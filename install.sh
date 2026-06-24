@@ -195,7 +195,7 @@ else
     INSTALL_SPEC="-e ."
 fi
 
-$PIP_CMD install --quiet --no-cache-dir $INSTALL_SPEC
+$PIP_CMD install --quiet --no-cache-dir --force-reinstall $INSTALL_SPEC
 
 log_ok "ovbuilder package installed"
 
@@ -257,6 +257,9 @@ for py in "$VENV_DIR/bin/python" "$VENV_DIR/bin/python3"*; do
 done
 
 if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
+    # Also fix parent directories so user can traverse the path to the binary
+    sudo chmod 755 "$INSTALL_DIR" 2>/dev/null || true
+    sudo chmod 755 "$VENV_DIR" 2>/dev/null || true
     log_ok "Sudo install detected — permissions explicitly fixed for normal user."
 fi
 
@@ -287,4 +290,6 @@ echo "To uninstall later:"
 echo "    $0 --uninstall"
 echo
 
-log_ok "Done."# Note: sudo installs are non-editable to avoid root .egg-info in source (fixes permission denied on user files after sudo pip -e)
+log_ok "Done."
+
+# Note: sudo installs are non-editable to avoid root .egg-info in source (fixes permission denied on user files after sudo pip -e)
