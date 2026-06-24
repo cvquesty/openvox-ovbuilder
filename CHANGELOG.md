@@ -5,6 +5,17 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.4] - 2026-06-24
+
+### Fixed
+- Bare `ovbuilder` (no subcommand) crashed with `TypeError: 'OptionInfo' and 'int'` on `memory * 1024` (and similar for cpus/disk).
+  - Root cause: the default-to-build path in `main.py` calls `build_command(ctx)` directly. Typer does not process `Option()` defaults, so parameters receive raw `typer.models.OptionInfo` objects.
+  - Hardened the direct-invoke path: OptionInfo guards now use both `isinstance` and `type().__name__` check; added `_coerce_sizing()` normalization right before arithmetic and var building so None or leaked OptionInfo always become the safe cfg defaults.
+- Removed stray unconditional `vsphere_user = None; vsphere_password = None` that would have broken flag-passed credentials in non-interactive use.
+- vSphere credentials entered during interactive prompts were not reaching Terraform (`Missing required argument "user"/"password"`, "Invalid provider configuration").
+  - The long interactive block + separate passing of user/pass made it easy to drop the values.
+  - Fix: populate auth into vm_vars defensively, add final carry step right before the terraform call, and (most importantly) the driver now always supplies `vsphere_user`, `vsphere_password`, and `vsphere_server` via *explicit* `-var=...` on the command line + TF_VAR_* + VSPHERE_* env vars. This guarantees the root provider block receives them.
+
 ## [0.2.0-dev.3] - 2026-06-24
 
 ### Fixed

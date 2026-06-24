@@ -44,15 +44,28 @@ def run_terraform_apply(
     env["TF_VAR_folder"] = config.folder
     env["TF_VAR_firmware"] = config.firmware
 
-    if vsphere_user:
-        env["TF_VAR_vsphere_user"] = vsphere_user
-    if vsphere_password:
-        env["TF_VAR_vsphere_password"] = vsphere_password
-    # server from vars if provided (discovery)
-    if "vsphere_server" in vars:
-        env["TF_VAR_vsphere_server"] = vars["vsphere_server"]
-
     cmd = ["terraform", "apply", "-auto-approve"]
+
+    # Always carry auth credentials forward explicitly.
+    # Prefer values that were passed in (from interactive prompts or flags).
+    # Also pull from the vars dict (defensive carry in build.py).
+    effective_user = vsphere_user or vars.get("vsphere_user")
+    effective_password = vsphere_password or vars.get("vsphere_password")
+    effective_server = vars.get("vsphere_server") or getattr(config, "vsphere_server", None)
+
+    if effective_user:
+        env["TF_VAR_vsphere_user"] = effective_user
+        env["VSPHERE_USER"] = effective_user
+        cmd += [f"-var=vsphere_user={effective_user}"]
+    if effective_password:
+        env["TF_VAR_vsphere_password"] = effective_password
+        env["VSPHERE_PASSWORD"] = effective_password
+        cmd += [f"-var=vsphere_password={effective_password}"]
+
+    if effective_server:
+        env["TF_VAR_vsphere_server"] = effective_server
+        env["VSPHERE_SERVER"] = effective_server
+        cmd += [f"-var=vsphere_server={effective_server}"]
 
     # VM specific
     cmd += [f"-var=vm_name={vars['vm_name']}"]

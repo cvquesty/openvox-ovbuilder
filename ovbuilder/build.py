@@ -52,14 +52,46 @@ def build(
     When run with no arguments (or missing critical flags), ovbuilder
     enters an interactive mode with a friendly OS selector and prompts.
     """
+    # When the bare "ovbuilder" command (no subcommand) invokes us directly via
+    # build_command(ctx), Typer has not processed the Option() defaults.
+    # The parameters arrive as OptionInfo objects instead of their resolved
+    # values (None, etc.). Guard against that so the rest of the logic works.
+    try:
+        from typer.models import OptionInfo
+    except Exception:
+        OptionInfo = ()
+
+    def _is_optioninfo(v):
+        if isinstance(v, OptionInfo):
+            return True
+        return type(v).__name__ == "OptionInfo"
+
+    if _is_optioninfo(hostname):
+        hostname = None
+    if _is_optioninfo(ip):
+        ip = None
+    if _is_optioninfo(iso):
+        iso = None
+    if _is_optioninfo(cpus):
+        cpus = None
+    if _is_optioninfo(memory):
+        memory = None
+    if _is_optioninfo(disk):
+        disk = None
+    if _is_optioninfo(non_interactive):
+        non_interactive = False
+    if _is_optioninfo(vsphere_server):
+        vsphere_server = None
+    if _is_optioninfo(vsphere_user):
+        vsphere_user = None
+    if _is_optioninfo(vsphere_password):
+        vsphere_password = None
+
     cfg: OvbuilderConfig = ctx.obj.get("config") if ctx.obj else get_config_manager().load_config()
     tf_dir = get_config_manager().get_effective_terraform_dir()
 
     # Collect parameters (interactive if needed)
     interactive = not (hostname and ip and iso) and not non_interactive
-
-    vsphere_user = None
-    vsphere_password = None
 
     if interactive:
         console.print(Panel.fit("[bold]ovbuilder — OpenVox VM Builder[/bold]", subtitle="Terraform + ISO + Agent registration"))
@@ -222,6 +254,34 @@ def build(
         cfg.vsphere_server = vsphere_server
         # user/pass may be None, terraform will use env or tfvars if needed
 
+    # Final normalization for sizing values.
+    # This makes OptionInfo leakage (from bare "ovbuilder" direct ctx call)
+    # or stale installs completely impossible to reach the arithmetic below.
+    def _coerce_sizing(val, default):
+        if isinstance(val, (int, float)):
+            return int(val)
+        if isinstance(val, str):
+            try:
+                return int(val)
+            except Exception:
+                pass
+        try:
+            from typer.models import OptionInfo
+            if isinstance(val, OptionInfo) or type(val).__name__ == "OptionInfo":
+                return int(default)
+        except Exception:
+            pass
+        if val is None:
+            return int(default)
+        try:
+            return int(val)
+        except Exception:
+            return int(default)
+
+    cpus = _coerce_sizing(cpus, cfg.default_cpus)
+    memory = _coerce_sizing(memory, cfg.default_memory_gb)
+    disk = _coerce_sizing(disk, cfg.default_disk_gb)
+
     # Build variable dict for the terraform module.
     # Infrastructure values come from discovery (or cfg fallbacks).
     vm_vars = {
@@ -236,7 +296,16 @@ def build(
         "vm_datastore": cfg.vm_datastore,
         "iso_datastore": cfg.iso_datastore,
         "vsphere_server": cfg.vsphere_server,
+        # Auth values are also carried here (in addition to the dedicated params below).
+        # This makes it harder to accidentally drop them in the long interactive flow.
+        "vsphere_user": vsphere_user,
+        "vsphere_password": vsphere_password,
     }
+
+    # Final defensive carry of the auth values the user entered (or supplied via flags).
+    # The interactive flow is long; this ensures nothing between the prompt and here drops them.
+    vsphere_user = vm_vars.get("vsphere_user") or vsphere_user
+    vsphere_password = vm_vars.get("vsphere_password") or vsphere_password
 
     # Run Terraform
     success = run_terraform_apply(
