@@ -89,7 +89,7 @@ variable "folder" {
 variable "domain" {
   description = "DNS domain suffix (used for linux_options if customization is added later)"
   type        = string
-  default     = "smfc-it.twitter.biz"
+  default     = "example.com"
 }
 
 variable "boot_delay_ms" {

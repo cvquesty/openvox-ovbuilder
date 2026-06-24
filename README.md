@@ -4,7 +4,7 @@
 
 **The OpenVox-native CLI for building VMware VMs from ISO images — fast, repeatable, and a little bit magical.**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0--dev.1-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Typer](https://img.shields.io/badge/Typer-0.12+-blue?style=for-the-badge&logo=python&logoColor=white)](https://typer.tiangolo.com)
@@ -73,11 +73,29 @@ The bundled Terraform module always uses **thin provisioning** for disks and dis
 ## 🚀 Quick Start
 
 ```bash
-# 1. Install (from a checkout or released package)
-pip install -e .
+# Clone the repository
+git clone https://github.com/cvquesty/openvox-ovbuilder.git
+cd openvox-ovbuilder
 
-# 2. Run the builder (interactive by default — you'll love it)
+# Run the installer.
+# It automatically finds a suitable Python, creates a virtual environment,
+# and wires up the `ovbuilder` command so you never need to run pip manually.
+sudo ./install.sh
+
+# Run the builder
 ovbuilder build
+```
+
+The installer creates a dedicated virtual environment using your system's Python and places the `ovbuilder` command in your PATH. It never relies on a bare `pip` command existing in your environment. This makes the tool accessible even if you rarely work with Python directly.
+
+### Manual / Development Install
+
+If you prefer to manage the environment yourself (or are actively developing ovbuilder):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
 During the flow you'll pick an ISO, give it a name and IP, choose some sizing, watch Terraform do its thing, finish the OS install in the console, then let ovbuilder finish the registration for you.
@@ -98,7 +116,8 @@ ovbuilder build \
 - **Gorgeous interactive mode** with OS selector table and smart defaults
 - **Everything is thin provisioned** — no fat disks by accident
 - **Real post-install magic** — hostname, IP, and the OpenVox agent bootstrap over SSH
-- **Self-contained** — ships with its own Terraform module so it just works out of the box
+- **Self-contained** — includes its own Terraform module + `install.sh`
+- **Beginner-friendly for non-Python users** — the installer locates a working Python 3, creates a venv, and sets up the command for you. No need to type `pip` manually.
 - **Follows the ovox design language** — same config locations, same vibe, same "it just feels right" feeling
 - **College-junior friendly docs** — we explain the "why" without talking down to you
 
@@ -128,7 +147,7 @@ vm_datastore: vsanDatastore
 iso_datastore: isos
 networks:
   - "VM Production"
-openvox_server: openvox.pdxc-it.twitter.biz
+openvox_server: openvox.example.com
 default_cpus: 2
 default_memory_gb: 4
 default_disk_gb: 80

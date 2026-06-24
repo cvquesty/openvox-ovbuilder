@@ -36,14 +36,14 @@ class OvbuilderConfig(BaseModel):
     vm_datastore: str = "vsanDatastore"
     iso_datastore: str = "isos"
     networks: List[str] = ["VM Production"]
-    datacenter: str = "SMFC DC"
-    cluster: str = "SMFC Compute"
-    domain: str = "smfc-it.twitter.biz"
+    datacenter: str = "Main DC"
+    cluster: str = "Production Cluster"
+    domain: str = "example.com"
     folder: str = ""
     firmware: str = "efi"
 
     # OpenVox registration target (used in post-provision step)
-    openvox_server: str = "openvox.pdxc-it.twitter.biz"
+    openvox_server: str = "openvox.example.com"
 
     # Defaults for interactive builds
     default_cpus: int = 2

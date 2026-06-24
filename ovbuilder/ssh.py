@@ -75,7 +75,7 @@ def run_post_install_steps(
     prefix: int = 24,
     gateway: Optional[str] = None,
     dns: Optional[str] = None,
-    openvox_server: str = "openvox.pdxc-it.twitter.biz",
+    openvox_server: str = "openvox.example.com",
 ) -> bool:
     """Connect via SSH and perform post-OS-install steps."""
 

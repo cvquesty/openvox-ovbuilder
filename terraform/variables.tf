@@ -15,7 +15,7 @@ variable "vsphere_password" {
 }
 
 variable "vsphere_server" {
-  description = "vSphere server FQDN (e.g. vc01.smfc-it.twitter.biz)"
+  description = "vSphere server FQDN (e.g. vcenter.example.com)"
   type        = string
 }
 
@@ -103,7 +103,7 @@ variable "firmware" {
 variable "domain" {
   description = "DNS domain for documentation / future customization"
   type        = string
-  default     = "smfc-it.twitter.biz"
+  default     = "example.com"
 }
 
 variable "folder" {

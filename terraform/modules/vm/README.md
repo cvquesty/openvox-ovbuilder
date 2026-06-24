@@ -18,7 +18,7 @@ module "new_vm" {
   source = "./modules/vm"
 
   vm_name       = "itsys-test01"
-  datacenter    = "SMFC DC"
+  datacenter    = "Main DC"
   cluster       = "Compute Cluster"
   vm_datastore  = "vsanDatastore"
   iso_datastore = "isos"
@@ -51,7 +51,7 @@ See the root `main.tf` + `terraform.tfvars` for a complete pattern.
 - Use PowerCLI on the vCenter to list all valid IDs for your environment:
 
 ```powershell
-Connect-VIServer vc01.smfc-it.twitter.biz
+Connect-VIServer vcenter.example.com
 $esxi = Get-VMHost | Select -First 1
 $envBrowser = Get-View $esxi.ExtensionData.Parent.ExtensionData.ConfigManager.EnvironmentBrowser
 $envBrowser.QueryConfigOptionDescriptor() | % { $_.Key }
