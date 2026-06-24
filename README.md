@@ -107,32 +107,41 @@ ovbuilder build
 
 For it to persist, add the export line above to your `~/.zshrc` (default on modern macOS) and restart your terminal, or run `source ~/.zshrc`.
 
-The installer now **detects sudo usage** and proactively runs `sudo chmod 755` on the actual executable, its shebang interpreter, the bin directory, and the symlink. This happens automatically at the end of a sudo install so the next command (`ovbuilder build`) should succeed without permission errors.
+**Critical fix in the current installer:** For sudo/system installs we now do a *regular* (non-editable) `pip install .` instead of `-e .`.
 
-The installer now has a final step that **always** ensures the `ovbuilder` command (and the python it uses) is executable:
+This prevents pip from creating any files in your source checkout as root (e.g. the `ovbuilder.egg-info` directory with 0750 root:staff permissions you observed). Root-owned files in the source tree prevent your normal user from descending into directories, causing "permission denied" or "not found" even for the installed command.
+
+Editable mode is only used for user-mode (`--user`) installs.
+
+The installer always ends with aggressive permission fixes (`chmod +x || sudo chmod +x`) on the symlink and real target.
+
+If you are still seeing the error right now, fix your source tree and re-install:
 
 ```bash
-chmod +x "$TARGET_LINK" ... || sudo chmod +x ...
+cd /path/to/your/openvox-ovbuilder-clone
+sudo chown -R $(id -un):staff .
+sudo chmod -R u+rwX .
+
+sudo -H ./install.sh
 ```
 
-If you are still seeing the error right now, force-fix it with:
+Then in the same shell:
 
 ```bash
-sudo chmod +x /usr/local/bin/ovbuilder
-sudo chmod +x /opt/ovbuilder/venv/bin/ovbuilder 2>/dev/null || true
-sudo chmod +x /opt/ovbuilder/venv/bin/python* 2>/dev/null || true
 export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
 hash -r
 ovbuilder build
 ```
 
-Then run the installer again with the current script:
+If permission denied persists on the command:
 
 ```bash
-sudo -H ./install.sh
+sudo chmod +x /usr/local/bin/ovbuilder
+sudo chmod +x /opt/ovbuilder/venv/bin/ovbuilder 2>/dev/null || true
+sudo chmod +x /opt/ovbuilder/venv/bin/python* 2>/dev/null || true
+hash -r
+ovbuilder build
 ```
-
-It will detect the sudo install and keep the permissions correct.
 
 ### Manual / Development Install
 

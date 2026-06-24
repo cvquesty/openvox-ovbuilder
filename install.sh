@@ -185,9 +185,17 @@ $PIP_CMD install --quiet --no-cache-dir --upgrade pip
 # --- Install ovbuilder ---
 log_info "Installing ovbuilder into the virtual environment..."
 
-# We use -e (editable) by default so that changes in the source tree are picked up.
-# This is convenient for both development and when running from a git checkout.
-$PIP_CMD install --quiet --no-cache-dir -e "$SCRIPT_DIR"
+# For system installs (sudo), we do a regular (non-editable) install to avoid
+# creating root-owned files like .egg-info in your source tree (which can cause
+# "permission denied" or traversal issues for the normal user).
+# Editable (-e) is only for --user or non-sudo dev installs.
+if [[ "$USE_SUDO" == true ]]; then
+    INSTALL_SPEC="."
+else
+    INSTALL_SPEC="-e ."
+fi
+
+$PIP_CMD install --quiet --no-cache-dir $INSTALL_SPEC
 
 log_ok "ovbuilder package installed"
 
