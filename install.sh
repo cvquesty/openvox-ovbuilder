@@ -216,11 +216,22 @@ fi
 
 log_ok "Symlink created: $TARGET_LINK → $OVBUILDER_BIN"
 
+echo "Installed command location: $TARGET_LINK"
+if [ -L "$TARGET_LINK" ]; then
+  echo "  Points to: $(readlink -f "$TARGET_LINK" 2>/dev/null || readlink "$TARGET_LINK")"
+fi
+
+echo ""
+echo "To use 'ovbuilder' in this shell right now:"
+echo "  export PATH=\"$BIN_DIR:\$PATH\""
+echo "  hash -r"
+echo "  ovbuilder build"
+echo ""
+
 # --- Proactive permission fix (the script knows when it used sudo) ---
 # When sudo was used for install, the files are root-owned.
 # We must guarantee the thing the user types ("ovbuilder") is executable
 # by the non-root user right now, before the script exits.
-# This runs the chmod (with sudo if needed) so "ovbuilder build" works immediately.
 chmod +x "$TARGET_LINK" 2>/dev/null || sudo chmod +x "$TARGET_LINK" 2>/dev/null || true
 
 if [ -L "$TARGET_LINK" ]; then
