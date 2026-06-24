@@ -324,3 +324,25 @@ log_ok "Done."
 
 # Note: sudo installs are non-editable to avoid root .egg-info in source (fixes permission denied on user files after sudo pip -e)
 # pyvenv.cfg and venv files now get a+rX for sudo installs to fix PermissionError on site import
+
+# === FINAL PERMISSION FIX (always run) ===
+# This ensures the symlink and pyvenv.cfg are usable by the normal user.
+# Use -h for the symlink so we chmod the link itself, not the target.
+if [ -L /usr/local/bin/ovbuilder ]; then
+    sudo chmod -h 755 /usr/local/bin/ovbuilder 2>/dev/null || chmod -h 755 /usr/local/bin/ovbuilder 2>/dev/null || true
+fi
+if [ -f /opt/ovbuilder/venv/pyvenv.cfg ]; then
+    sudo chmod 644 /opt/ovbuilder/venv/pyvenv.cfg 2>/dev/null || true
+fi
+if [ -d /opt/ovbuilder ]; then
+    sudo chmod 755 /opt/ovbuilder 2>/dev/null || true
+    sudo chmod 755 /opt/ovbuilder/venv 2>/dev/null || true
+    sudo chmod 755 /opt/ovbuilder/venv/bin 2>/dev/null || true
+fi
+# For user mode too
+if [ -L "$HOME/.local/bin/ovbuilder" ]; then
+    chmod -h 755 "$HOME/.local/bin/ovbuilder" 2>/dev/null || true
+fi
+if [ -f "$HOME/.local/share/ovbuilder/venv/pyvenv.cfg" ]; then
+    chmod 644 "$HOME/.local/share/ovbuilder/venv/pyvenv.cfg" 2>/dev/null || true
+fi
