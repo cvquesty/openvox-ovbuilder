@@ -75,7 +75,7 @@ def main(
     ctx.obj = {"config": cfg}
 
     if ctx.invoked_subcommand is None:
-        ctx.invoke(build_command)
+        build_command(ctx)
 
 
 cli.command("build", help="Interactively or non-interactively build a new VM")(build_command)
