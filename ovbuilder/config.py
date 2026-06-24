@@ -115,16 +115,25 @@ class ConfigManager:
         cfg = self.load_config()
         if cfg.terraform_dir:
             return Path(cfg.terraform_dir).expanduser().resolve()
+
+        # Check standard installed locations first (populated by install.sh)
+        for base in ("/opt/ovbuilder", Path.home() / ".local/share/ovbuilder"):
+            candidate = Path(base) / "terraform"
+            if candidate.exists() and (candidate / "main.tf").exists():
+                return candidate
+
         # Default to the bundled terraform/ directory inside this project
         # (self-contained repo with modules/vm for ISO provisioning)
         here = Path(__file__).resolve().parent.parent  # ovbuilder/ovbuilder/ -> ovbuilder/
         bundled = here / "terraform"
-        if bundled.exists():
+        if bundled.exists() and (bundled / "main.tf").exists():
             return bundled
+
         # Fallback for development in larger workspace
         candidate = here.parent / "itsys"
-        if candidate.exists():
+        if candidate.exists() and (candidate / "main.tf").exists():
             return candidate
+
         return Path.cwd() / "terraform"
 
 

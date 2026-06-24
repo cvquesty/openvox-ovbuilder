@@ -199,6 +199,47 @@ $PIP_CMD install --quiet --no-cache-dir --force-reinstall $INSTALL_SPEC
 
 log_ok "ovbuilder package installed"
 
+# --- Stage Terraform modules and ensure init ---
+log_info "Staging Terraform provisioning modules..."
+TF_SRC="$SCRIPT_DIR/terraform"
+TF_DEST="$INSTALL_DIR/terraform"
+
+if [[ "$USE_SUDO" == true ]]; then
+    sudo rm -rf "$TF_DEST"
+    sudo mkdir -p "$TF_DEST"
+    sudo cp -a "$TF_SRC/." "$TF_DEST/"
+else
+    rm -rf "$TF_DEST"
+    mkdir -p "$TF_DEST"
+    cp -a "$TF_SRC/." "$TF_DEST/"
+fi
+
+if command -v terraform >/dev/null 2>&1; then
+    if [ ! -d "$TF_DEST/.terraform" ] || [ ! -f "$TF_DEST/.terraform.lock.hcl" ]; then
+        log_info "Running terraform init in $TF_DEST ..."
+        if [[ "$USE_SUDO" == true ]]; then
+            sudo -H terraform -chdir="$TF_DEST" init -upgrade -input=false
+        else
+            terraform -chdir="$TF_DEST" init -upgrade -input=false
+        fi
+        log_ok "terraform init complete."
+    else
+        log_info "Terraform already initialized (skipping init)."
+    fi
+else
+    log_warn "terraform not found in PATH. You may need to install Terraform and run 'terraform -chdir=$TF_DEST init' manually."
+fi
+
+# Fix ownership so normal user can run terraform later (writes to .terraform/)
+if [[ "$USE_SUDO" == true && -n "${SUDO_USER:-}" ]]; then
+    REAL_USER="$SUDO_USER"
+    REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
+    sudo chown -R "$REAL_USER:$REAL_GROUP" "$TF_DEST"
+    log_info "Terraform directory ownership set for $REAL_USER"
+fi
+
+log_ok "Terraform modules staged to $TF_DEST"
+
 # Force correct permissions on the entry point and interpreter.
 # This prevents "permission denied" when the venv was created under sudo
 # and umask was restrictive (common on macOS).
