@@ -210,6 +210,7 @@ ovbuilder build \
 - **Real post-install magic** — hostname, IP, and the OpenVox agent bootstrap over SSH
 - **Self-contained** — includes its own Terraform module + `install.sh`
 - **Beginner-friendly for non-Python users** — the installer locates a working Python 3, creates a venv, and sets up the command for you. No need to type `pip` manually.
+- **vCenter discovery** — in interactive mode, you provide vCenter login once; ovbuilder connects, discovers real datacenters/clusters/datastores/networks/ISOs from your environment, and uses them to populate friendly selection menus (no more guessing "Main DC" or "VM Production" that don't exist in your vCenter). Data is used live for that run (caching can be added later).
 - **Follows the ovox design language** — same config locations, same vibe, same "it just feels right" feeling
 - **College-junior friendly docs** — we explain the "why" without talking down to you
 

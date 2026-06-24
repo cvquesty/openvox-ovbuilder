@@ -33,6 +33,7 @@ class OvbuilderConfig(BaseModel):
         default="",
         description="Path to the directory containing the Terraform root module for VM provisioning (defaults to bundled ./terraform if not set)"
     )
+    vsphere_server: str = "vcenter.example.com"
     vm_datastore: str = "vsanDatastore"
     iso_datastore: str = "isos"
     networks: List[str] = ["VM Production"]

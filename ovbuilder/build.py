@@ -18,6 +18,7 @@ from rich.table import Table
 from .config import get_config_manager, OvbuilderConfig
 from .terraform import run_terraform_apply
 from .ssh import run_post_install_steps
+from . import vsphere
 
 console = Console()
 
@@ -41,6 +42,9 @@ def build(
     memory: Optional[int] = typer.Option(None, "--memory", "-m", help="Memory in GB"),
     disk: Optional[int] = typer.Option(None, "--disk", "-d", help="Disk size in GB (thin)"),
     non_interactive: bool = typer.Option(False, "--yes", "-y", help="Do not prompt; fail if required values missing"),
+    vsphere_server: Optional[str] = typer.Option(None, "--vsphere-server", help="vCenter FQDN"),
+    vsphere_user: Optional[str] = typer.Option(None, "--vsphere-user", help="vCenter username"),
+    vsphere_password: Optional[str] = typer.Option(None, "--vsphere-password", help="vCenter password"),
 ):
     """
     Build a new VMware VM from an ISO and register it with OpenVox.
@@ -60,34 +64,133 @@ def build(
     if interactive:
         console.print(Panel.fit("[bold]ovbuilder — OpenVox VM Builder[/bold]", subtitle="Terraform + ISO + Agent registration"))
 
-        # 1. Collect vSphere credentials (like "login" in ovox)
+        # 1. Collect vSphere credentials
+        vsphere_server = Prompt.ask("vSphere server FQDN", default=cfg.vsphere_server)
         vsphere_user = Prompt.ask("vSphere username")
         vsphere_password = Prompt.ask("vSphere password", password=True)
 
-        console.print(f"[dim]Using Terraform module at:[/dim] {tf_dir}")
+        console.print(f"[dim]Connecting to {vsphere_server} to discover inventory...[/dim]")
 
-        # 2. OS Selector
-        isos = get_known_isos(cfg)
-        table = Table(title="Available OS Images")
+        try:
+            si = vsphere.connect(vsphere_server, vsphere_user, vsphere_password)
+        except Exception as exc:
+            console.print(f"[red]vCenter connection failed: {exc}[/red]")
+            raise typer.Exit(1)
+
+        # Discover real values from vCenter
+        dcs = vsphere.list_datacenters(si)
+        if not dcs:
+            console.print("[yellow]No datacenters found. Falling back to manual entry.[/yellow]")
+            dc = Prompt.ask("Datacenter", default=cfg.datacenter)
+        else:
+            table = Table(title="Datacenters")
+            table.add_column("#")
+            table.add_column("Name")
+            for i, name in enumerate(dcs, 1):
+                table.add_row(str(i), name)
+            console.print(table)
+            choice = Prompt.ask("Select datacenter", default="1")
+            try:
+                dc = dcs[int(choice)-1]
+            except Exception:
+                dc = dcs[0]
+
+        clusters = vsphere.list_clusters(si, dc)
+        if not clusters:
+            cluster = Prompt.ask("Cluster", default=cfg.cluster)
+        else:
+            table = Table(title=f"Clusters in {dc}")
+            table.add_column("#")
+            table.add_column("Name")
+            for i, name in enumerate(clusters, 1):
+                table.add_row(str(i), name)
+            console.print(table)
+            choice = Prompt.ask("Select cluster", default="1")
+            try:
+                cluster = clusters[int(choice)-1]
+            except Exception:
+                cluster = clusters[0]
+
+        dss = vsphere.list_datastores(si, dc)
+        if not dss:
+            vm_ds = Prompt.ask("VM Datastore", default=cfg.vm_datastore)
+            iso_ds = Prompt.ask("ISO Datastore", default=cfg.iso_datastore)
+        else:
+            table = Table(title=f"Datastores in {dc}")
+            table.add_column("#")
+            table.add_column("Name")
+            for i, name in enumerate(dss, 1):
+                table.add_row(str(i), name)
+            console.print(table)
+            choice = Prompt.ask("Select VM datastore", default="1")
+            try:
+                vm_ds = dss[int(choice)-1]
+            except Exception:
+                vm_ds = dss[0]
+            choice = Prompt.ask("Select ISO datastore", default="1")
+            try:
+                iso_ds = dss[int(choice)-1]
+            except Exception:
+                iso_ds = dss[0]
+
+        nets = vsphere.list_networks(si, dc)
+        if not nets:
+            net_str = Prompt.ask("Networks (comma separated)", default=",".join(cfg.networks))
+            networks = [n.strip() for n in net_str.split(",") if n.strip()]
+        else:
+            table = Table(title=f"Networks in {dc}")
+            table.add_column("#")
+            table.add_column("Name")
+            for i, name in enumerate(nets, 1):
+                table.add_row(str(i), name)
+            console.print(table)
+            net_str = Prompt.ask("Select networks (comma separated numbers or names)", default="1")
+            try:
+                sel = [x.strip() for x in net_str.split(",")]
+                networks = []
+                for s in sel:
+                    if s.isdigit():
+                        idx = int(s) - 1
+                        if 0 <= idx < len(nets):
+                            networks.append(nets[idx])
+                    elif s in nets:
+                        networks.append(s)
+                if not networks:
+                    networks = [nets[0]]
+            except Exception:
+                networks = [nets[0]]
+
+        # ISOs from chosen iso datastore - always nice table + manual option, same as other selections
+        live_isos = vsphere.list_isos(si, iso_ds, dc) or []
+        items = [(p, p) for p in live_isos] + [("Other (enter path manually)", None)]
+        table = Table(title=f"ISO images on {iso_ds}")
         table.add_column("#", style="cyan")
-        table.add_column("OS")
-        table.add_column("ISO Path")
-
-        for i, (label, path) in enumerate(isos, 1):
-            table.add_row(str(i), label, path or "(manual)")
-
+        table.add_column("ISO")
+        for i, (label, _) in enumerate(items, 1):
+            table.add_row(str(i), label)
         console.print(table)
-        choice = Prompt.ask("Select OS", default="1")
+        choice = Prompt.ask("Select ISO", default="1")
         try:
             idx = int(choice) - 1
-            selected_label, selected_iso = isos[idx]
+            selected_label, selected = items[idx]
         except Exception:
-            selected_label, selected_iso = isos[-1]
-
-        if selected_iso is None:
-            iso_path = Prompt.ask("Enter ISO path (relative to iso_datastore)")
+            selected = items[0][1] if items else None
+        if selected is None:
+            iso_path = Prompt.ask("Enter ISO path (relative to iso datastore, or full)")
         else:
-            iso_path = selected_iso
+            iso_path = selected
+
+        vsphere.disconnect(si)
+
+        console.print(f"[dim]Using Terraform module at:[/dim] {tf_dir}")
+
+        # Update cfg with discovered values for terraform
+        cfg.vsphere_server = vsphere_server
+        cfg.datacenter = dc
+        cfg.cluster = cluster
+        cfg.vm_datastore = vm_ds
+        cfg.iso_datastore = iso_ds
+        cfg.networks = networks
 
         # 3. Identity
         hostname = Prompt.ask("Hostname")
@@ -115,8 +218,12 @@ def build(
         if cpus is None: cpus = cfg.default_cpus
         if memory is None: memory = cfg.default_memory_gb
         if disk is None: disk = cfg.default_disk_gb
+        vsphere_server = vsphere_server or cfg.vsphere_server
+        cfg.vsphere_server = vsphere_server
+        # user/pass may be None, terraform will use env or tfvars if needed
 
-    # Build variable dict for our itsys module
+    # Build variable dict for the terraform module.
+    # Infrastructure values come from discovery (or cfg fallbacks).
     vm_vars = {
         "vm_name": hostname,
         "iso_path": iso_path,
@@ -124,7 +231,11 @@ def build(
         "memory_mb": memory * 1024,
         "disk_size_gb": disk,
         "networks": cfg.networks,
-        # guest_id will be inferred in the Terraform or we can extend later
+        "datacenter": cfg.datacenter,
+        "cluster": cfg.cluster,
+        "vm_datastore": cfg.vm_datastore,
+        "iso_datastore": cfg.iso_datastore,
+        "vsphere_server": cfg.vsphere_server,
     }
 
     # Run Terraform

@@ -35,11 +35,11 @@ def run_terraform_apply(
 
     env = os.environ.copy()
 
-    # Pass non-sensitive config
-    env["TF_VAR_vsphere_datacenter"] = config.datacenter
-    env["TF_VAR_vsphere_cluster"] = config.cluster
-    env["TF_VAR_vm_datastore"] = config.vm_datastore
-    env["TF_VAR_iso_datastore"] = config.iso_datastore
+    # Pass non-sensitive config. Prefer values from vars (discovery) over cfg defaults.
+    env["TF_VAR_vsphere_datacenter"] = vars.get("datacenter", config.datacenter)
+    env["TF_VAR_vsphere_cluster"] = vars.get("cluster", config.cluster)
+    env["TF_VAR_vm_datastore"] = vars.get("vm_datastore", config.vm_datastore)
+    env["TF_VAR_iso_datastore"] = vars.get("iso_datastore", config.iso_datastore)
     env["TF_VAR_domain"] = config.domain
     env["TF_VAR_folder"] = config.folder
     env["TF_VAR_firmware"] = config.firmware
@@ -48,6 +48,9 @@ def run_terraform_apply(
         env["TF_VAR_vsphere_user"] = vsphere_user
     if vsphere_password:
         env["TF_VAR_vsphere_password"] = vsphere_password
+    # server from vars if provided (discovery)
+    if "vsphere_server" in vars:
+        env["TF_VAR_vsphere_server"] = vars["vsphere_server"]
 
     cmd = ["terraform", "apply", "-auto-approve"]
 
