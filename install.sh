@@ -257,10 +257,15 @@ for py in "$VENV_DIR/bin/python" "$VENV_DIR/bin/python3"*; do
 done
 
 if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
-    # Also fix parent directories so user can traverse the path to the binary
-    sudo chmod 755 "$INSTALL_DIR" 2>/dev/null || true
-    sudo chmod 755 "$VENV_DIR" 2>/dev/null || true
-    log_ok "Sudo install detected — permissions explicitly fixed for normal user."
+    # Make the entire venv readable and directories traversable by others.
+    # pyvenv.cfg and other config files need to be readable by the user
+    # who will run the python from the venv.
+    sudo chmod -R a+rX "$VENV_DIR" 2>/dev/null || true
+    # Explicitly ensure pyvenv.cfg is readable (site module reads it)
+    sudo chmod 644 "$VENV_DIR/pyvenv.cfg" 2>/dev/null || true
+    # Force execute on all binaries in bin/
+    sudo find "$VENV_DIR/bin" -type f -perm -u+x -exec chmod a+x {} + 2>/dev/null || true
+    log_ok "Sudo install detected — full venv permissions normalized for normal user."
 fi
 
 # --- Verify and give PATH help ---
