@@ -323,3 +323,4 @@ fi
 log_ok "Done."
 
 # Note: sudo installs are non-editable to avoid root .egg-info in source (fixes permission denied on user files after sudo pip -e)
+# pyvenv.cfg and venv files now get a+rX for sudo installs to fix PermissionError on site import
