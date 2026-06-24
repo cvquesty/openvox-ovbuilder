@@ -287,4 +287,4 @@ echo "To uninstall later:"
 echo "    $0 --uninstall"
 echo
 
-log_ok "Done."
+log_ok "Done."# Note: sudo installs are non-editable to avoid root .egg-info in source (fixes permission denied on user files after sudo pip -e)
