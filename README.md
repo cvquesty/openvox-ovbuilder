@@ -4,7 +4,7 @@
 
 **The OpenVox-native CLI for building VMware VMs from ISO images — fast, repeatable, and a little bit magical.**
 
-[![Version](https://img.shields.io/badge/version-0.2.0--dev.2-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0--dev.3-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Typer](https://img.shields.io/badge/Typer-0.12+-blue?style=for-the-badge&logo=python&logoColor=white)](https://typer.tiangolo.com)
@@ -109,17 +109,30 @@ For it to persist, add the export line above to your `~/.zshrc` (default on mode
 
 The installer now **detects sudo usage** and proactively runs `sudo chmod 755` on the actual executable, its shebang interpreter, the bin directory, and the symlink. This happens automatically at the end of a sudo install so the next command (`ovbuilder build`) should succeed without permission errors.
 
-If you still see "permission denied" after a sudo install, run this one-time fix:
+The installer now has a final step that **always** ensures the `ovbuilder` command (and the python it uses) is executable:
 
 ```bash
-sudo chmod 755 /opt/ovbuilder/venv/bin/ovbuilder /opt/ovbuilder/venv/bin/python* /usr/local/bin/ovbuilder 2>/dev/null || true
-sudo chmod 755 /opt/ovbuilder/venv/bin
+chmod +x "$TARGET_LINK" ... || sudo chmod +x ...
+```
+
+If you are still seeing the error right now, force-fix it with:
+
+```bash
+sudo chmod +x /usr/local/bin/ovbuilder
+sudo chmod +x /opt/ovbuilder/venv/bin/ovbuilder 2>/dev/null || true
+sudo chmod +x /opt/ovbuilder/venv/bin/python* 2>/dev/null || true
 export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
 hash -r
 ovbuilder build
 ```
 
-Then re-run the installer with `sudo -H ./install.sh` for future safety.
+Then run the installer again with the current script:
+
+```bash
+sudo -H ./install.sh
+```
+
+It will detect the sudo install and keep the permissions correct.
 
 ### Manual / Development Install
 

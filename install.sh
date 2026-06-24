@@ -216,31 +216,29 @@ fi
 
 log_ok "Symlink created: $TARGET_LINK → $OVBUILDER_BIN"
 
-# --- Aggressive permission hardening when sudo was used ---
-# The script detects sudo (via USE_SUDO or running as root).
-# We MUST ensure the installed binary + its interpreter are executable
-# by the normal user *before* we exit, so the very next command "ovbuilder build"
-# does not fail with "permission denied".
-if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
-    # Fix the actual executable (follow symlink)
-    REAL_TARGET=$(readlink -f "$TARGET_LINK" 2>/dev/null || echo "$OVBUILDER_BIN")
-    if [ -n "$REAL_TARGET" ]; then
-        sudo chmod 755 "$REAL_TARGET" 2>/dev/null || true
+# --- Proactive permission fix (the script knows when it used sudo) ---
+# When sudo was used for install, the files are root-owned.
+# We must guarantee the thing the user types ("ovbuilder") is executable
+# by the non-root user right now, before the script exits.
+# This runs the chmod (with sudo if needed) so "ovbuilder build" works immediately.
+chmod +x "$TARGET_LINK" 2>/dev/null || sudo chmod +x "$TARGET_LINK" 2>/dev/null || true
+
+if [ -L "$TARGET_LINK" ]; then
+    real_target=$(readlink -f "$TARGET_LINK" 2>/dev/null || readlink "$TARGET_LINK")
+    if [ -n "$real_target" ] && [ -f "$real_target" ]; then
+        chmod +x "$real_target" 2>/dev/null || sudo chmod +x "$real_target" 2>/dev/null || true
     fi
+fi
 
-    # Fix the symlink itself
-    sudo chmod 755 "$TARGET_LINK" 2>/dev/null || true
+# Also ensure the python the wrapper calls is executable
+for py in "$VENV_DIR/bin/python" "$VENV_DIR/bin/python3"*; do
+    if [ -f "$py" ]; then
+        chmod +x "$py" 2>/dev/null || sudo chmod +x "$py" 2>/dev/null || true
+    fi
+done
 
-    # Fix the bin directory and all python interpreters (shebang targets)
-    sudo chmod 755 "$VENV_DIR/bin" 2>/dev/null || true
-    for py in "$VENV_DIR/bin/python" "$VENV_DIR/bin/python3"*; do
-        [ -f "$py" ] && sudo chmod 755 "$py" 2>/dev/null || true
-    done
-
-    # As a belt-and-suspenders, make the whole bin dir world-executable for scripts
-    sudo find "$VENV_DIR/bin" -type f -exec chmod 755 {} + 2>/dev/null || true
-
-    log_ok "Permissions fixed for normal user execution (sudo install detected)."
+if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
+    log_ok "Sudo install detected — permissions explicitly fixed for normal user."
 fi
 
 # --- Verify and give PATH help ---

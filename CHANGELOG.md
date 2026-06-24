@@ -5,6 +5,12 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.3] - 2026-06-24
+
+### Fixed
+- Installer now proactively ensures the installed `ovbuilder` command is executable by normal users when run with sudo. It detects sudo usage and uses a fallback `chmod +x || sudo chmod +x` on both the symlink and real target (using readlink -f), plus the python interpreter(s). This directly addresses repeated "zsh: permission denied: ovbuilder" after `sudo ./install.sh` on macOS.
+- Strengthened post-install permission block to run reliably regardless of previous uninstall/reinstall state.
+
 ## [0.2.0-dev.2] - 2026-06-24
 
 ### Fixed
