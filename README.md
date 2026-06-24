@@ -93,9 +93,46 @@ You should be able to run:
 ovbuilder build
 ```
 
-**If you get "permission denied: ovbuilder" or "command not found":**
+**From your ls output (this is the exact problem):**
 
-This can happen on macOS (especially after using `sudo` for install, or in a shell that hasn't refreshed its PATH cache).
+The symlink `/usr/local/bin/ovbuilder` has `lrwxr-x---` (0750) — other users have no permissions on the link.
+
+`pyvenv.cfg` has `-rw-r-----` (0640) — no read for your normal user.
+
+The dirs are 755 and the wrapper is 755 (good).
+
+**Immediate fix for your current state:**
+
+```bash
+sudo chmod -h 755 /usr/local/bin/ovbuilder
+sudo chmod 644 /opt/ovbuilder/venv/pyvenv.cfg
+sudo chmod 755 /opt/ovbuilder/venv /opt/ovbuilder/venv/bin
+
+export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
+hash -r
+ovbuilder build
+```
+
+**If your source checkout still has the bad `ovbuilder.egg-info` (0750 root:staff):**
+
+```bash
+sudo chown -R $(id -un):staff .
+sudo chmod -R u+rwX .
+```
+
+**Pull the latest script and re-install:**
+
+```bash
+git fetch origin
+git reset --hard origin/staging
+sudo -H ./install.sh
+```
+
+The script now ends with a block that always does the `chmod +x || sudo chmod +x` (with -h for the link) and the a+rX for the venv.
+
+It will print the exact location and the commands to run in this shell.
+
+The "which not found" is zsh's hash cache after the permission denied — `hash -r` clears it.
 
 Run:
 
