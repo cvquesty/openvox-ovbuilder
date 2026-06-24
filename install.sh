@@ -290,6 +290,31 @@ echo "To uninstall later:"
 echo "    $0 --uninstall"
 echo
 
+# Final hard guarantee: make the delivered command executable for the invoking user.
+# This runs no matter what, and uses sudo if the files are root-owned.
+if [ -L /usr/local/bin/ovbuilder ]; then
+    sudo chmod +x /usr/local/bin/ovbuilder 2>/dev/null || chmod +x /usr/local/bin/ovbuilder 2>/dev/null || true
+    real=$(readlink -f /usr/local/bin/ovbuilder 2>/dev/null || true)
+    if [ -n "$real" ] && [ -f "$real" ]; then
+        sudo chmod +x "$real" 2>/dev/null || chmod +x "$real" 2>/dev/null || true
+    fi
+fi
+
+if [ -L "$HOME/.local/bin/ovbuilder" ]; then
+    chmod +x "$HOME/.local/bin/ovbuilder" 2>/dev/null || true
+    real=$(readlink -f "$HOME/.local/bin/ovbuilder" 2>/dev/null || true)
+    if [ -n "$real" ] && [ -f "$real" ]; then
+        chmod +x "$real" 2>/dev/null || true
+    fi
+fi
+
+# Make sure parent directories are searchable by others (critical for sudo installs on macOS)
+if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
+    sudo chmod +x /opt/ovbuilder 2>/dev/null || true
+    sudo chmod +x /opt/ovbuilder/venv 2>/dev/null || true
+    sudo chmod +x /opt/ovbuilder/venv/bin 2>/dev/null || true
+fi
+
 log_ok "Done."
 
 # Note: sudo installs are non-editable to avoid root .egg-info in source (fixes permission denied on user files after sudo pip -e)
