@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtualenv
+.venv
+venv/
+ENV/
+env/
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfplan
+.terraform.lock.hcl
+
+# Secrets / local config (never commit)
+*.auto.tfvars
+*.auto.tfvars.json
+terraform.tfvars
+.env
+.env.*
+config.yaml
+token
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs
+*.log

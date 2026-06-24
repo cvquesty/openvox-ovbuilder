@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ovbuilder"
+version = "0.1.0"
+description = "ovbuilder — OpenVox command-line tool for building VMware VMs from ISO"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.9"
+authors = [
+  {name = "Jerald Sheets", email = "questy@gmail.com"}
+]
+keywords = ["openvox", "puppet", "vmware", "terraform", "cli", "provisioning"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: System :: Systems Administration",
+]
+
+dependencies = [
+  "typer>=0.12.0",
+  "rich>=13.0.0",
+  "paramiko>=3.0.0",
+  "pyyaml>=6.0",
+  "pydantic>=2.0",
+]
+
+[project.scripts]
+ovbuilder = "ovbuilder.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/cvquesty/openvox-gui"
+Repository = "https://github.com/cvquesty/openvox-gui"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ovbuilder*"]
