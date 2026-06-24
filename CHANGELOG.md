@@ -5,6 +5,15 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.2] - 2026-06-24
+
+### Fixed
+- Installer now aggressively detects sudo (via USE_SUDO and EUID) and explicitly `sudo chmod 755` the real target binary, symlink, venv bin dir, and python interpreters *after* creating the symlink. This ensures `ovbuilder` is executable by the normal user even after `sudo ./install.sh`.
+- Added `readlink -f` + targeted chmod + `find` to cover umask issues common on macOS with sudo.
+- Improved uninstall to always clean both system and user locations.
+- Better post-install messaging with exact commands for PATH and `hash -r`.
+- README updated with sudo -H recommendation and immediate fix commands for "permission denied" after sudo.
+
 ## [0.2.0-dev.1] - 2026-06-24
 
 ### Added

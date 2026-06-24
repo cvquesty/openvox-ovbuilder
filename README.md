@@ -4,7 +4,7 @@
 
 **The OpenVox-native CLI for building VMware VMs from ISO images — fast, repeatable, and a little bit magical.**
 
-[![Version](https://img.shields.io/badge/version-0.2.0--dev.1-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0--dev.2-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Typer](https://img.shields.io/badge/Typer-0.12+-blue?style=for-the-badge&logo=python&logoColor=white)](https://typer.tiangolo.com)
@@ -77,20 +77,53 @@ The bundled Terraform module always uses **thin provisioning** for disks and dis
 git clone https://github.com/cvquesty/openvox-ovbuilder.git
 cd openvox-ovbuilder
 
-# Run the installer.
-# It automatically finds a suitable Python, creates a virtual environment,
-# and wires up the `ovbuilder` command so you never need to run pip manually.
-sudo ./install.sh
+# Run the installer (recommended).
+# Use sudo -H on macOS to avoid HOME/permission issues.
+sudo -H ./install.sh
 
-# Run the builder
+# Run the builder — it should just work
 ovbuilder build
 ```
 
-The installer creates a dedicated virtual environment using your system's Python and places the `ovbuilder` command in your PATH. It never relies on a bare `pip` command existing in your environment. This makes the tool accessible even if you rarely work with Python directly.
+### After Installation
+
+You should be able to run:
+
+```bash
+ovbuilder build
+```
+
+**If you get "permission denied: ovbuilder" or "command not found":**
+
+This can happen on macOS (especially after using `sudo` for install, or in a shell that hasn't refreshed its PATH cache).
+
+Run:
+
+```bash
+export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
+hash -r
+ovbuilder build
+```
+
+For it to persist, add the export line above to your `~/.zshrc` (default on modern macOS) and restart your terminal, or run `source ~/.zshrc`.
+
+The installer now **detects sudo usage** and proactively runs `sudo chmod 755` on the actual executable, its shebang interpreter, the bin directory, and the symlink. This happens automatically at the end of a sudo install so the next command (`ovbuilder build`) should succeed without permission errors.
+
+If you still see "permission denied" after a sudo install, run this one-time fix:
+
+```bash
+sudo chmod 755 /opt/ovbuilder/venv/bin/ovbuilder /opt/ovbuilder/venv/bin/python* /usr/local/bin/ovbuilder 2>/dev/null || true
+sudo chmod 755 /opt/ovbuilder/venv/bin
+export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
+hash -r
+ovbuilder build
+```
+
+Then re-run the installer with `sudo -H ./install.sh` for future safety.
 
 ### Manual / Development Install
 
-If you prefer to manage the environment yourself (or are actively developing ovbuilder):
+If you prefer to manage the environment yourself:
 
 ```bash
 python3 -m venv .venv
