@@ -41,7 +41,8 @@ See the root `main.tf` + `terraform.tfvars` for a complete pattern.
 1. **No guest customization during create** — the VM is booting an installer, not a finished guest.
 2. Set `wait_for_guest_*` to 0 (module does this by default).
 3. Use `boot_delay_ms` (default 10s) so the BIOS/UEFI sees the CD.
-4. After OS install + first boot + VMware Tools install, IPs will start appearing.
+4. The module sets `bios.bootDeviceClasses` + a cdrom attachment + boot delay. This makes the selected ISO get mounted as a virtual CD-ROM and makes the firmware more likely to boot the installer automatically.
+5. After OS install + first boot + VMware Tools install, IPs will start appearing.
 5. You can safely re-run `terraform apply` later to adjust CPU/RAM/disk or add NICs.
 
 ## Common guest_id values

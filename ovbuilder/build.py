@@ -192,14 +192,25 @@ def build(
             except Exception:
                 networks = [nets[0]]
 
-        # ISOs from chosen iso datastore - always nice table + manual option, same as other selections
+        # ISOs from chosen iso datastore. Prefer live inventory; fall back to
+        # curated known_isos from config if the browser returns nothing.
         live_isos = vsphere.list_isos(si, iso_ds, dc) or []
-        items = [(p, p) for p in live_isos] + [("Other (enter path manually)", None)]
-        table = Table(title=f"ISO images on {iso_ds}")
+        if live_isos:
+            items = [(p, p) for p in live_isos]
+            table_title = f"ISO images on {iso_ds}"
+        else:
+            console.print(
+                f"[yellow]No ISOs discovered on datastore '{iso_ds}'. "
+                "Falling back to known_isos from config (or manual entry).[/yellow]"
+            )
+            items = list(get_known_isos(cfg)[:-1])  # drop the built-in "Other" row; we add it below
+            table_title = f"Known ISOs (config) — expected on {iso_ds}"
+        items.append(("Other (enter path manually)", None))
+        table = Table(title=table_title)
         table.add_column("#", style="cyan")
         table.add_column("ISO")
-        for i, (label, _) in enumerate(items, 1):
-            table.add_row(str(i), label)
+        for i, (label, path) in enumerate(items, 1):
+            table.add_row(str(i), path or label)
         console.print(table)
         choice = Prompt.ask("Select ISO", default="1")
         try:

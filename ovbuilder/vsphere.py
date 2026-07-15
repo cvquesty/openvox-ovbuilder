@@ -139,12 +139,20 @@ def list_isos(si, datastore_name: str, datacenter_name: str) -> List[str]:
 
         results = []
         for res in task.info.result or []:
-            folder = res.folderPath or ""
+        results = []
+        for res in task.info.result or []:
             for f in res.file or []:
                 if f.path and f.path.lower().endswith(".iso"):
-                    # Build relative path
-                    path = (folder + f.path).lstrip("/")
-                    results.append(path)
+                    fp = res.folderPath or ""
+                    # Strip leading [datastore_name] prefix (and any whitespace/slashes after it)
+                    # e.g. "[isos] " or "[isos]/subdir/" -> clean relative path
+                    if fp.startswith("["):
+                        close = fp.find("]")
+                        if close != -1:
+                            fp = fp[close + 1 :]
+                    path = (fp + (f.path or "")).strip().lstrip("/")
+                    if path:
+                        results.append(path)
         return sorted(set(results))
     except Exception:
         # Fallback to manual entry

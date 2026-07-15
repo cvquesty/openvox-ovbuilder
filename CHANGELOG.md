@@ -5,6 +5,17 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.17] - 2026-07-15
+
+### Fixed
+- Interactive ISO selection falls back to curated `known_isos` (with clear messaging) when live datastore browse returns no files.
+- ISO path discovery strips the `[datastore]` prefix so Terraform receives a clean relative path for the CD-ROM block.
+- README no longer dumps long install-permission troubleshooting in the Quick Start path; recovery notes live under Troubleshooting.
+- Module prefers CD-ROM boot via `bios.bootDeviceClasses` alongside attach + boot delay.
+
+### Changed
+- Documented live vSphere discovery flow end-to-end; version aligned to `0.2.0-dev.17` (past prior `v0.2.0-dev.*` tags whose VERSION file had drifted).
+
 ## [0.2.0-dev.4] - 2026-06-24
 
 ### Fixed

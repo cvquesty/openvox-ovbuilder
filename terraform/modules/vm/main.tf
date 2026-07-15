@@ -72,7 +72,7 @@ resource "vsphere_virtual_machine" "vm" {
     unit_number      = 0
   }
 
-  # Attach the OS ISO from datastore
+  # Attach the OS ISO from datastore so it is mounted as a virtual CD-ROM
   cdrom {
     datastore_id = data.vsphere_datastore.iso_ds.id
     path         = var.iso_path
@@ -87,10 +87,17 @@ resource "vsphere_virtual_machine" "vm" {
   wait_for_guest_net_timeout = 0
   wait_for_guest_ip_timeout  = 0
 
-  # Optional: expose disk UUIDs to guest
-  extra_config = var.enable_disk_uuid ? {
-    "disk.EnableUUID" = "TRUE"
-  } : {}
+  # Optional: expose disk UUIDs to guest.
+  # We also set bios.bootDeviceClasses so the firmware is more likely to try
+  # the attached CD-ROM (containing the selected ISO) early in the sequence.
+  extra_config = merge(
+    var.enable_disk_uuid ? { "disk.EnableUUID" = "TRUE" } : {},
+    {
+      # Prefer CD-ROM for initial boot (helps both BIOS and many EFI cases).
+      # The cdrom block + boot_delay do the heavy lifting of mounting the ISO.
+      "bios.bootDeviceClasses" = "allow:cd,hd,net"
+    }
+  )
 
   tags = var.tags
 
