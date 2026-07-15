@@ -139,8 +139,6 @@ def list_isos(si, datastore_name: str, datacenter_name: str) -> List[str]:
 
         results = []
         for res in task.info.result or []:
-        results = []
-        for res in task.info.result or []:
             for f in res.file or []:
                 if f.path and f.path.lower().endswith(".iso"):
                     fp = res.folderPath or ""
