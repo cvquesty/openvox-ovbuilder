@@ -238,9 +238,22 @@ def build(
         # 3. Identity
         hostname = Prompt.ask("Hostname")
         ip = Prompt.ask("IP Address")
-        prefix = int(Prompt.ask("Prefix (CIDR)", default="24"))
-        gateway = Prompt.ask("Gateway (optional)", default="") or None
-        dns = Prompt.ask("DNS (optional)", default="") or None
+        # Prefix length (CIDR): the number after the slash in 10.0.42.10/24.
+        # 24 = netmask 255.255.255.0 (typical LAN); 16 = 255.255.0.0; 8 = 255.0.0.0.
+        console.print(
+            "[dim]Subnet prefix length (CIDR): how many network bits the IP uses.\n"
+            "  Example: IP 10.0.42.10 with prefix [bold]24[/bold] means [bold]10.0.42.10/24[/bold] "
+            "(mask 255.255.255.0).\n"
+            "  Common values: 24 (most LANs), 23, 22, 16. Do not enter the full mask.[/dim]"
+        )
+        prefix = int(
+            Prompt.ask(
+                "Subnet prefix length (e.g. 24 for /24)",
+                default="24",
+            )
+        )
+        gateway = Prompt.ask("Default gateway IP (optional)", default="") or None
+        dns = Prompt.ask("DNS server IP (optional)", default="") or None
 
         # 4+5. Sizing (thin is always on in the module)
         cpus = int(Prompt.ask("CPUs", default=str(cfg.default_cpus)))

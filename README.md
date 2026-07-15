@@ -43,7 +43,7 @@ It follows the same modern, noun-verb, operator-first philosophy as the `ovox` C
 
 | Component              | Version       | Notes |
 |------------------------|---------------|-------|
-| **ovbuilder CLI**      | `0.2.0-dev.18` | Typer + Rich + pyVmomi. Live vCenter discovery. |
+| **ovbuilder CLI**      | `0.2.0-dev.19` | Typer + Rich + pyVmomi. Live vCenter discovery. |
 | **Terraform Module**   | 1.x (bundled) | VMware vSphere ISO boot + thin disks + EFI. Lives in `terraform/modules/vm/`. |
 | **Python Runtime**     | 3.9+          | Typer ≥0.12, Rich ≥13, Paramiko ≥3, pyVmomi ≥8. |
 | **Post-Install**       | —             | Hostname + static IP (nmcli/netplan best-effort) + official OpenVox `install.bash`. |

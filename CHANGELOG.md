@@ -5,6 +5,13 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.19] - 2026-07-15
+
+### Changed
+- Interactive network prompts: replaced cryptic "Prefix (CIDR)" with a short explanation and
+  "Subnet prefix length (e.g. 24 for /24)" (what the `/24` in `10.0.42.10/24` means).
+  Gateway/DNS labels clarified as IP addresses.
+
 ## [0.2.0-dev.18] - 2026-07-15
 
 ### Fixed
