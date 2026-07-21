@@ -1,7 +1,13 @@
-# Packer: AlmaLinux 10 → vSphere template for ovbuilder
+# Packer: AlmaLinux 10 → vSphere template (NO DHCP / NO SSH to guest)
 #
-# Kickstart is delivered via a second virtual CD (cd_content), NOT Packer's
-# HTTP server — the build laptop is not reachable from PDXC guest networks.
+# Flow:
+#   1. Attach install ISO + OEMDRV kickstart CD
+#   2. Boot, unattended install, %post bakes tools/cloud-init/cleanup
+#   3. Kickstart `poweroff` — Packer sees powered-off VM
+#   4. remove_cdrom + convert_to_template
+#
+# Clone identity (hostname, static IP, …) is applied later by ovbuilder
+# via guestinfo / cloud-init — never during this golden build.
 
 packer {
   required_plugins {
@@ -33,15 +39,6 @@ variable "iso_datastore" {
 variable "insecure_connection" {
   type    = bool
   default = true
-}
-variable "ssh_password" {
-  type      = string
-  default   = "ChangeMe-BuildOnly!"
-  sensitive = true
-}
-variable "ssh_public_key" {
-  type    = string
-  default = ""
 }
 variable "template_name" {
   type    = string
@@ -79,6 +76,7 @@ source "vsphere-iso" "almalinux10" {
   datastore  = var.datastore
   folder     = var.folder != "" ? var.folder : null
 
+  # NIC still attached so clones inherit a vNIC; no DHCP used during build.
   network_adapters {
     network      = var.network
     network_card = "vmxnet3"
@@ -98,44 +96,27 @@ source "vsphere-iso" "almalinux10" {
 
   iso_paths = local.iso_paths
 
-  # Embed kickstart on a second ISO so the guest never needs HTTP to the laptop.
-  # Use path.cwd (packer/ when invoked as `packer build almalinux-10` from packer/).
+  # Kickstart on second CD (no HTTP to the laptop)
   cd_content = {
     "ks.cfg" = file("${path.cwd}/almalinux-10/http/ks.cfg")
   }
   cd_label = "OEMDRV"
 
   boot_wait = "8s"
-  # UEFI GRUB: append kickstart from the OEMDRV / cdrom label (RHEL finds OEMDRV automatically too)
   boot_command = [
-    "e<down><down><end> inst.ks=cdrom:/dev/sr1:/ks.cfg inst.sshd<leftCtrlOn>x<leftCtrlOff>"
+    "e<down><down><end> inst.ks=cdrom:/dev/sr1:/ks.cfg<leftCtrlOn>x<leftCtrlOff>"
   ]
 
-  ssh_username           = "almalinux"
-  ssh_password           = var.ssh_password
-  ssh_timeout            = "90m"
-  ssh_handshake_attempts = 200
+  # No guest IP, no SSH — wait for kickstart `poweroff`.
+  communicator = "none"
+  # Full DVD install + %post can take well over 5m on shared storage.
+  shutdown_timeout = "120m"
 
-  shutdown_command    = "echo '${var.ssh_password}' | sudo -S /sbin/shutdown -h now"
   convert_to_template = true
   remove_cdrom        = true
 }
 
 build {
   sources = ["source.vsphere-iso.almalinux10"]
-
-  provisioner "shell" {
-    execute_command = "echo '${var.ssh_password}' | {{ .Vars }} sudo -S -E bash '{{ .Path }}'"
-    scripts = [
-      "${path.root}/../scripts/install-alma.sh",
-      "${path.root}/../scripts/cleanup-linux.sh",
-    ]
-  }
-
-  provisioner "shell" {
-    execute_command = "echo '${var.ssh_password}' | {{ .Vars }} sudo -S -E bash -c '{{ .Vars }} {{ .Path }}'"
-    inline = [
-      "if [ -n '${var.ssh_public_key}' ]; then mkdir -p /home/almalinux/.ssh && echo '${var.ssh_public_key}' >> /home/almalinux/.ssh/authorized_keys && chown -R almalinux:almalinux /home/almalinux/.ssh && chmod 700 /home/almalinux/.ssh && chmod 600 /home/almalinux/.ssh/authorized_keys; fi",
-    ]
-  }
+  # No shell provisioners — everything is in kickstart %post.
 }

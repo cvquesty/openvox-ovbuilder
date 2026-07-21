@@ -1,7 +1,7 @@
-# Packer: Ubuntu 24.04 → vSphere template for ovbuilder
+# Packer: Ubuntu 24.04 → vSphere template (NO DHCP / NO SSH to guest)
 #
-# Autoinstall user-data is on a NoCloud CD (cd_content), not Packer HTTP —
-# PDXC guests cannot reach the build laptop.
+# Autoinstall + late-commands bake tools/cloud-init; shutdown: poweroff.
+# Packer communicator=none waits for poweroff, then convert_to_template.
 
 packer {
   required_plugins {
@@ -33,15 +33,6 @@ variable "iso_datastore" {
 variable "insecure_connection" {
   type    = bool
   default = true
-}
-variable "ssh_password" {
-  type      = string
-  default   = "ChangeMe-BuildOnly!"
-  sensitive = true
-}
-variable "ssh_public_key" {
-  type    = string
-  default = ""
 }
 variable "template_name" {
   type    = string
@@ -98,7 +89,6 @@ source "vsphere-iso" "ubuntu2404" {
 
   iso_paths = local.iso_paths
 
-  # NoCloud seed ISO (meta-data + user-data) for autoinstall without network.
   cd_content = {
     "user-data" = file("${path.cwd}/ubuntu-24.04/http/user-data")
     "meta-data" = file("${path.cwd}/ubuntu-24.04/http/meta-data")
@@ -113,31 +103,14 @@ source "vsphere-iso" "ubuntu2404" {
     "<f10>",
   ]
 
-  ssh_username           = "ubuntu"
-  ssh_password           = var.ssh_password
-  ssh_timeout            = "90m"
-  ssh_handshake_attempts = 200
+  communicator     = "none"
+  # Autoinstall + late-commands need far more than the 5m default.
+  shutdown_timeout = "120m"
 
-  shutdown_command    = "echo '${var.ssh_password}' | sudo -S /sbin/shutdown -h now"
   convert_to_template = true
   remove_cdrom        = true
 }
 
 build {
   sources = ["source.vsphere-iso.ubuntu2404"]
-
-  provisioner "shell" {
-    execute_command = "echo '${var.ssh_password}' | {{ .Vars }} sudo -S -E bash '{{ .Path }}'"
-    scripts = [
-      "${path.root}/../scripts/install-ubuntu.sh",
-      "${path.root}/../scripts/cleanup-linux.sh",
-    ]
-  }
-
-  provisioner "shell" {
-    execute_command = "echo '${var.ssh_password}' | {{ .Vars }} sudo -S -E bash -c '{{ .Vars }} {{ .Path }}'"
-    inline = [
-      "if [ -n '${var.ssh_public_key}' ]; then mkdir -p /home/ubuntu/.ssh && echo '${var.ssh_public_key}' >> /home/ubuntu/.ssh/authorized_keys && chown -R ubuntu:ubuntu /home/ubuntu/.ssh && chmod 700 /home/ubuntu/.ssh && chmod 600 /home/ubuntu/.ssh/authorized_keys; fi",
-    ]
-  }
 }

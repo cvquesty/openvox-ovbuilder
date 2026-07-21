@@ -3,6 +3,19 @@
 Build **versioned vSphere templates** once; day-to-day `ovbuilder build` only
 clones them and injects hostname / IP from the interview.
 
+## No-DHCP design (PDXC / static-IP fleets)
+
+There is **no DHCP** for build or production guests. That is expected.
+
+| Stage | Network | How identity is set |
+|-------|---------|---------------------|
+| **Packer golden** | NIC attached, **no IP required** | Kickstart/autoinstall only; `communicator = "none"`; guest **poweroff** when done |
+| **ovbuilder clone** | Interview supplies **unique** hostname, IP, CIDR, gateway, DNS | cloud-init guestinfo at clone time |
+
+Packer never SSHes into the golden and never waits for a guest IP. If a build
+sits on “Waiting for IP…”, the template is still on the old SSH/DHCP path —
+rebuild with the current HCL (`communicator = "none"`).
+
 | Image key (ovbuilder) | Packer dir | Default template name | Login user |
 |----------------------|------------|------------------------|------------|
 | `almalinux-10` | `almalinux-10/` | `ovbuilder-almalinux-10` | `almalinux` |

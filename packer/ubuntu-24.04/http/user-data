@@ -1,4 +1,8 @@
 #cloud-config
+# Ubuntu 24.04 autoinstall — ovbuilder golden (NO DHCP required)
+#
+# Packer uses communicator=none and waits for poweroff. Identity for clones
+# comes later from ovbuilder cloud-init guestinfo (hostname + static IP).
 autoinstall:
   version: 1
   locale: en_US.UTF-8
@@ -7,7 +11,7 @@ autoinstall:
   identity:
     hostname: ovbuilder-ubuntu-build
     username: ubuntu
-    # password: ChangeMe-BuildOnly!  (openssl passwd -6)
+    # ChangeMe-BuildOnly!  (openssl passwd -6)
     password: "$6$RaFy6HOCllXP3RLw$7aJ8pbBtpNJuI.b/UZG.AYHihuCm.x4nmcN0m2oZq2SWmdG1GB3LQsKCzkR7T70vdH6zmcydtGBtUANq6KU4K."
   ssh:
     install-server: true
@@ -15,6 +19,7 @@ autoinstall:
   storage:
     layout:
       name: direct
+  # No DHCP — leave NICs down/unconfigured for the golden
   network:
     network:
       version: 2
@@ -22,7 +27,8 @@ autoinstall:
         any:
           match:
             name: "e*"
-          dhcp4: true
+          dhcp4: false
+          optional: true
   packages:
     - open-vm-tools
     - cloud-init
@@ -33,7 +39,8 @@ autoinstall:
     - vim-tiny
   user-data:
     disable_root: false
-    package_update: true
+    package_update: false
+    package_upgrade: false
     users:
       - name: ubuntu
         groups: [sudo]
@@ -44,17 +51,25 @@ autoinstall:
       expire: false
       list:
         - ubuntu:ChangeMe-BuildOnly!
-    runcmd:
-      - systemctl enable open-vm-tools.service || true
-      - |
-        mkdir -p /etc/cloud/cloud.cfg.d
-        cat >/etc/cloud/cloud.cfg.d/99-ovbuilder-vmware.cfg <<'EOF'
-        datasource_list: [ VMware, OVF, None ]
-        datasource:
-          VMware:
-            allow_raw_data: true
-        EOF
   late-commands:
     - echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/ubuntu
     - chmod 440 /target/etc/sudoers.d/ubuntu
     - curtin in-target --target=/target -- systemctl enable open-vm-tools.service || true
+    - curtin in-target --target=/target -- systemctl enable ssh.service || true
+    - curtin in-target --target=/target -- systemctl enable cloud-init.service cloud-init-local.service cloud-config.service cloud-final.service || true
+    - |
+      cat > /target/etc/cloud/cloud.cfg.d/99-ovbuilder-vmware.cfg <<'EOF'
+      datasource_list: [ VMware, OVF, None ]
+      datasource:
+        VMware:
+          allow_raw_data: true
+      EOF
+    # Hygiene so first clone gets unique identity
+    - curtin in-target --target=/target -- cloud-init clean --logs || true
+    - truncate -s 0 /target/etc/machine-id || true
+    - rm -f /target/var/lib/dbus/machine-id || true
+    - ln -sf /etc/machine-id /target/var/lib/dbus/machine-id || true
+    - rm -f /target/etc/ssh/ssh_host_* || true
+    - rm -f /target/etc/netplan/*.yaml || true
+  # Packer communicator=none waits for poweroff
+  shutdown: poweroff
