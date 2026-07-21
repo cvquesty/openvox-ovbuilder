@@ -1,13 +1,15 @@
 # Packer: AlmaLinux 10 → vSphere template (NO DHCP / NO SSH)
 #
-# Boot media layout (critical):
-#   CD1 = AlmaLinux DVD  → inst.stage2 + inst.repo via **DVD volume LABEL**
-#   CD2 = OEMDRV seed    → ks.cfg via **LABEL=OEMDRV**
+# Why previous boots hit dracut emergency (kickstart.sh /tmp/ks.cfg.done):
+#   Editing GRUB and setting inst.stage2=cdrom / wrong LABEL made dracut wait
+#   for stage2 or ks on the wrong device. With TWO CDs, bare "cdrom" is ambiguous.
 #
-# Do NOT use bare "inst.stage2=cdrom" with two CDs — dracut may bind the
-# wrong disc and hang in initqueue (or never write /tmp/ks.cfg.done).
-#
-# AlmaLinux/RHEL 10: every Anaconda cmdline option needs the "inst." prefix.
+# Reliable approach for Alma/RHEL:
+#   1. Leave the DVD's own GRUB entry alone (it already has correct inst.stage2
+#      for the install media — with proper inst. prefixes on Alma 10).
+#   2. Attach kickstart as second CD labeled OEMDRV with file ks.cfg at root.
+#      Anaconda auto-loads ks.cfg from a volume labeled OEMDRV (no inst.ks= needed).
+#   3. Only append inst.text if we must edit; prefer default boot (Enter).
 
 packer {
   required_plugins {
@@ -47,11 +49,6 @@ variable "template_name" {
 variable "iso_path" {
   type    = string
   default = "Linux_ISO/AlmaLinux/10/x86_64/AlmaLinux-10.1-x86_64-dvd.iso"
-}
-# ISO-9660 Volume id of the AlmaLinux DVD (override if console shows a different LABEL=).
-variable "iso_label" {
-  type    = string
-  default = "AlmaLinux-10-1-x86_64-dvd"
 }
 variable "cpu" {
   type    = number
@@ -98,29 +95,24 @@ source "vsphere-iso" "almalinux10" {
     disk_thin_provisioned = true
   }
 
-  # Install DVD (package repo + stage2)
+  # CD1: AlmaLinux DVD (stage2 + packages) — GRUB on this disc is authoritative
   iso_paths = local.iso_paths
 
-  # Kickstart seed CD — Anaconda looks for label OEMDRV by design.
-  # Keep stage2/repo on the DVD LABEL so this disc is only for ks.cfg.
+  # CD2: kickstart only. Label MUST be OEMDRV for Anaconda auto-load of /ks.cfg
   cd_content = {
     "ks.cfg" = file("${path.cwd}/almalinux-10/http/ks.cfg")
   }
   cd_label = "OEMDRV"
 
-  boot_wait = "15s"
-  #
-  # Edit UEFI GRUB linux line: force DVD for stage2/repo, OEMDRV for kickstart.
-  # All keys use mandatory "inst." prefix (AlmaLinux / RHEL 10).
-  #
+  # Wait for UEFI GRUB from the DVD
+  boot_wait = "20s"
+
+  # Do NOT rewrite stage2/repo — DVD defaults are correct on Alma 10.
+  # Boot the highlighted GRUB entry (Enter). OEMDRV supplies kickstart automatically.
+  # Fallback: if menu needs a key, send Enter twice with waits.
   boot_command = [
-    "e<wait>",
-    "<down><down><end><wait>",
-    " inst.stage2=hd:LABEL=${var.iso_label}",
-    " inst.repo=hd:LABEL=${var.iso_label}",
-    " inst.ks=hd:LABEL=OEMDRV:/ks.cfg",
-    " inst.text",
-    "<leftCtrlOn>x<leftCtrlOff>",
+    "<enter><wait30s>",
+    "<enter><wait>",
   ]
 
   communicator     = "none"
