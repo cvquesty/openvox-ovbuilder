@@ -104,10 +104,22 @@ source "vsphere-iso" "almalinux10" {
 
   # Give UEFI GRUB time to appear on slow shared storage.
   boot_wait = "12s"
-  # Prefer LABEL=OEMDRV (Packer cd_label) — more reliable than /dev/sr1 paths.
-  # Anaconda also auto-scans OEMDRV; explicit inst.ks keeps it deterministic.
+  #
+  # AlmaLinux / RHEL 10 Anaconda: the "inst." prefix is mandatory on all
+  # installer kernel cmdline options. Omitting inst.stage2 / inst.repo causes:
+  #   "possible causes are a missing inst.stage2 or inst.repo..."
+  #
+  # Media layout at boot:
+  #   sr0 (or first CD) = AlmaLinux DVD  → stage2 + package repo
+  #   OEMDRV (cd_content)                → ks.cfg
+  #
+  # Append to the DVD's default GRUB linux line, then boot (Ctrl-x).
   boot_command = [
-    "e<down><down><end> inst.ks=hd:LABEL=OEMDRV:/ks.cfg inst.text<leftCtrlOn>x<leftCtrlOff>"
+    "e<down><down><end>",
+    " inst.stage2=cdrom inst.repo=cdrom",
+    " inst.ks=hd:LABEL=OEMDRV:/ks.cfg",
+    " inst.text",
+    "<leftCtrlOn>x<leftCtrlOff>",
   ]
 
   # No guest IP, no SSH — wait for kickstart `poweroff`.
