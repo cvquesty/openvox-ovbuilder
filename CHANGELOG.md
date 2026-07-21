@@ -5,6 +5,23 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta1] - 2026-07-21
+
+### Review release (correctness, DRY, docs)
+- Full codebase review: correctness, de-duplication, best practices.
+- **vSphere**: shared DC lookup + task waiter (no busy-spin on ISO browse);
+  extensive module docs for connect/list/disconnect-media.
+- **build**: removed dead OptionInfo loop; extracted table helpers; golden
+  agent bootstrap skips re-network (cloud-init already applied).
+- **ssh**: no invented default gateway/DNS; optional `configure_network`;
+  shell-token safety checks on identity fields.
+- **terraform driver**: SSL allow flag from config (not hard-coded only);
+  documented per-VM state isolation rationale.
+- **network / cloud_init / config / main / version**: line-level documentation
+  of contracts and failure modes.
+- Terraform module header comments for clone vs iso lifecycle.
+- Version train jumps to **0.97-beta1** (operator-requested beta tag).
+
 ## [0.3.0-dev.2] - 2026-07-21
 
 ### Fixed

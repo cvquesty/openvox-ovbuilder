@@ -1,14 +1,29 @@
 # =============================================================================
-# ovbuilder VM module — dual mode:
-#   provision_mode = "clone"  → clone Packer golden template + cloud-init identity
-#   provision_mode = "iso"    → legacy empty disk + ISO attach
+# ovbuilder VM module — dual mode
+# =============================================================================
+#
+# provision_mode = "clone"
+#   Clone a Packer golden template. Identity (hostname/IP) is injected via
+#   guestinfo_* extra_config (cloud-init). No install ISO is attached.
+#   Disk size is max(requested, template disk) so clones never shrink.
+#
+# provision_mode = "iso"
+#   Create empty thin disk + attach datastore ISO for interactive/kickstart
+#   install. CD-ROM is intentionally left attached at create time so the
+#   guest can boot the media. ovbuilder disconnects the ISO via pyVmomi after
+#   OS install; lifecycle.ignore_changes on cdrom prevents re-attach on apply.
+#
+# Both resources use count so only one exists in state. Per-VM state files
+# (outside this module) ensure ovca3 create does not rename ovca2.
 # =============================================================================
 
 locals {
-  iso_ds       = var.iso_datastore != null && var.iso_datastore != "" ? var.iso_datastore : var.vm_datastore
-  is_clone     = var.provision_mode == "clone"
-  is_iso       = var.provision_mode == "iso"
-  guestinfo    = var.guestinfo_extra_config
+  # Prefer dedicated ISO datastore; fall back to VM datastore when unset.
+  iso_ds    = var.iso_datastore != null && var.iso_datastore != "" ? var.iso_datastore : var.vm_datastore
+  is_clone  = var.provision_mode == "clone"
+  is_iso    = var.provision_mode == "iso"
+  # Map of guestinfo.* keys from ovbuilder (base64 metadata/userdata).
+  guestinfo = var.guestinfo_extra_config
 }
 
 data "vsphere_datacenter" "dc" {

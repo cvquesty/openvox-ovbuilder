@@ -1,8 +1,25 @@
 """
-Terraform driver for ovbuilder.
+Terraform driver: apply with **per-VM isolated local state**.
 
-Per-VM local state under:
-  $XDG_DATA_HOME/ovbuilder/tfstate/<vm_name>/terraform.tfstate
+=============================================================================
+CRITICAL DESIGN: STATE ISOLATION
+=============================================================================
+The Terraform root always declares a single resource address:
+
+    module.vm → vsphere_virtual_machine.*
+
+If every build shared one terraform.tfstate, changing vm_name from ovca2
+to ovca3 was an *in-place update* (vSphere rename), not a create.
+
+Fix: each hostname gets its own state file:
+
+    $XDG_DATA_HOME/ovbuilder/tfstate/<sanitized-hostname>/terraform.tfstate
+
+Vars (including maps like guestinfo_extra_config) are written to a JSON
+var-file next to that state (mode 0600) because CLI ``-var=map`` quoting
+is fragile for base64 guestinfo payloads.
+
+Legacy shared state in the module directory is migrated once on apply.
 """
 
 from __future__ import annotations
@@ -20,10 +37,16 @@ from .config import OvbuilderConfig, get_config_manager
 
 console = Console()
 
+# Filesystem-safe subset for state directory names (hostnames may be FQDNs).
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def sanitize_state_key(vm_name: str) -> str:
+    """
+    Map a VM hostname to a safe single path component.
+
+    Replaces disallowed characters with underscore; caps length at 128.
+    """
     key = (vm_name or "unnamed").strip()
     key = _SAFE_NAME.sub("_", key)
     key = key.strip("._-") or "unnamed"
@@ -31,6 +54,7 @@ def sanitize_state_key(vm_name: str) -> str:
 
 
 def state_dir_for_vm(vm_name: str, data_dir: Optional[Path] = None) -> Path:
+    """Return (and create) the per-VM state directory under XDG data."""
     if data_dir is None:
         data_dir = get_config_manager().data_dir
     path = Path(data_dir) / "tfstate" / sanitize_state_key(vm_name)
@@ -39,10 +63,16 @@ def state_dir_for_vm(vm_name: str, data_dir: Optional[Path] = None) -> Path:
 
 
 def state_file_for_vm(vm_name: str, data_dir: Optional[Path] = None) -> Path:
+    """Path to terraform.tfstate for this hostname."""
     return state_dir_for_vm(vm_name, data_dir=data_dir) / "terraform.tfstate"
 
 
 def _vm_name_from_state_file(state_path: Path) -> Optional[str]:
+    """
+    Best-effort read of vsphere_virtual_machine.name from a local state file.
+
+    Used only for migrating the old shared state into the correct per-VM path.
+    """
     try:
         data = json.loads(state_path.read_text(encoding="utf-8"))
         for resource in data.get("resources") or []:
@@ -58,10 +88,18 @@ def _vm_name_from_state_file(state_path: Path) -> Optional[str]:
 
 
 def migrate_legacy_shared_state(tf_dir: Path) -> None:
+    """
+    One-time move of module-dir terraform.tfstate → per-VM path.
+
+    Older ovbuilder versions wrote a single shared state under the Terraform
+    module directory. Leaving it there is dangerous if someone runs bare
+    ``terraform apply`` without -state=. Migration renames it into XDG.
+    """
     legacy = tf_dir / "terraform.tfstate"
     if not legacy.is_file():
         return
     try:
+        # Empty / stub files are not worth migrating.
         if legacy.stat().st_size < 50:
             return
     except OSError:
@@ -70,12 +108,14 @@ def migrate_legacy_shared_state(tf_dir: Path) -> None:
     vm_name = _vm_name_from_state_file(legacy)
     if not vm_name:
         console.print(
-            f"[yellow]Legacy state at {legacy} has no VM name; leave it for manual review.[/yellow]"
+            f"[yellow]Legacy state at {legacy} has no VM name; "
+            f"leave it for manual review.[/yellow]"
         )
         return
 
     dest = state_file_for_vm(vm_name)
     if dest.exists():
+        # Per-VM state already authoritative — quarantine shared file.
         aside = legacy.with_suffix(".tfstate.legacy-shared")
         try:
             legacy.rename(aside)
@@ -105,8 +145,13 @@ def migrate_legacy_shared_state(tf_dir: Path) -> None:
 
 
 def ensure_terraform_init(tf_dir: Path, env: dict) -> bool:
-    terraform_dir = tf_dir / ".terraform"
-    if terraform_dir.is_dir() and any(terraform_dir.iterdir()):
+    """
+    Run ``terraform init`` only if .terraform is missing/empty.
+
+    Providers are shared across per-VM state files (same module dir).
+    """
+    terraform_meta = tf_dir / ".terraform"
+    if terraform_meta.is_dir() and any(terraform_meta.iterdir()):
         return True
     console.print(f"[dim]terraform init in {tf_dir}…[/dim]")
     try:
@@ -123,6 +168,7 @@ def ensure_terraform_init(tf_dir: Path, env: dict) -> bool:
 
 
 def _write_var_file(path: Path, payload: dict) -> None:
+    """Write JSON var-file with restrictive permissions (may contain passwords)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     try:
@@ -138,7 +184,24 @@ def run_terraform_apply(
     vsphere_user: Optional[str] = None,
     vsphere_password: Optional[str] = None,
 ) -> bool:
-    """Execute terraform apply with per-VM state + JSON var-file."""
+    """
+    Run ``terraform apply -auto-approve`` for one VM.
+
+    Parameters
+    ----------
+    tf_dir : Path
+        Root module (contains main.tf + modules/vm).
+    vars : dict
+        Build-time values from interview (vm_name, networks, guestinfo, …).
+    config : OvbuilderConfig
+        Fallbacks for placement / firmware / domain.
+    vsphere_user / vsphere_password : optional explicit auth
+
+    Returns
+    -------
+    bool
+        True if terraform exited 0.
+    """
     if not (tf_dir / "main.tf").exists():
         console.print(f"[red]No Terraform root module found at {tf_dir}[/red]")
         return False
@@ -153,8 +216,11 @@ def run_terraform_apply(
 
     effective_user = vsphere_user or vars.get("vsphere_user")
     effective_password = vsphere_password or vars.get("vsphere_password")
-    effective_server = vars.get("vsphere_server") or getattr(config, "vsphere_server", None)
+    effective_server = vars.get("vsphere_server") or getattr(
+        config, "vsphere_server", None
+    )
 
+    # Provider auth via both TF_VAR_* and VSPHERE_* (belt and suspenders).
     if effective_user:
         env["TF_VAR_vsphere_user"] = str(effective_user)
         env["VSPHERE_USER"] = str(effective_user)
@@ -169,19 +235,24 @@ def run_terraform_apply(
         return False
 
     migrate_legacy_shared_state(tf_dir)
+    # Re-resolve after possible migration for this hostname.
     state_path = state_file_for_vm(vm_name)
     backup_path = state_path.with_suffix(".tfstate.backup")
 
+    # Normalize CLI "golden" → Terraform "clone".
     provision_mode = vars.get("provision_mode") or "clone"
-    # CLI uses golden/iso; Terraform expects clone/iso
     if provision_mode == "golden":
         provision_mode = "clone"
+
+    allow_insecure = bool(
+        getattr(config, "vsphere_allow_unverified_ssl", True)
+    )
 
     tf_payload = {
         "vsphere_user": effective_user or "",
         "vsphere_password": effective_password or "",
         "vsphere_server": effective_server or config.vsphere_server,
-        "vsphere_allow_unverified_ssl": True,
+        "vsphere_allow_unverified_ssl": allow_insecure,
         "vsphere_datacenter": vars.get("datacenter", config.datacenter),
         "vsphere_cluster": vars.get("cluster", config.cluster),
         "vm_datastore": vars.get("vm_datastore", config.vm_datastore),
@@ -202,6 +273,7 @@ def run_terraform_apply(
     }
     _write_var_file(var_file, tf_payload)
 
+    # Explicit -state/-state-out so we never touch the module-dir default state.
     cmd = [
         "terraform",
         "apply",
@@ -227,7 +299,8 @@ def run_terraform_apply(
     legacy = tf_dir / "terraform.tfstate"
     if legacy.exists():
         console.print(
-            f"[yellow]Note: leftover shared state at {legacy} is ignored for new builds.[/yellow]"
+            f"[yellow]Note: leftover shared state at {legacy} "
+            f"is ignored for new builds.[/yellow]"
         )
 
     try:

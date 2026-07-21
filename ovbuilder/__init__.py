@@ -1,8 +1,11 @@
 """
 ovbuilder — OpenVox VM Builder
 
-Command-line tool for rapidly provisioning VMware virtual machines
-that are ready to join an OpenVox / Puppet fleet.
+Rapid provisioning of VMware virtual machines that join an OpenVox/Puppet
+fleet: Packer golden clone (default) or legacy ISO attach, with per-VM
+Terraform state and optional agent bootstrap.
 """
 
-__version__ = "0.3.0-dev.2"
+# Single source for setuptools / importlib when VERSION file is absent.
+# Keep in sync with root VERSION via release process (install / bump).
+__version__ = "0.97-beta1"

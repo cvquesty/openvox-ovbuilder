@@ -1,5 +1,9 @@
 # =============================================================================
 # ovbuilder root module
+#
+# Thin wrapper: all VM logic lives in modules/vm. Root only wires variables
+# from the CLI-generated var-file (or terraform.tfvars) into the module.
+# Provider configuration is in providers.tf.
 # =============================================================================
 
 module "vm" {

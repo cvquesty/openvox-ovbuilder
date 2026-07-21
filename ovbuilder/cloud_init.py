@@ -1,29 +1,55 @@
 """
-Generate cloud-init guestinfo payloads for golden-image clones.
+cloud-init guestinfo payloads for Packer golden-image clones.
 
-ovbuilder injects these via vSphere extra_config so first boot sets
-hostname + static IPv4 without console or post-SSH network hacks.
+=============================================================================
+WHY
+=============================================================================
+After Terraform clones a golden template, the guest must learn its
+per-instance identity without a console install:
+
+  * hostname / FQDN
+  * static IPv4 (address/prefix, gateway, DNS)
+
+VMware Tools + cloud-init read ``guestinfo.metadata`` and
+``guestinfo.userdata`` from the VM's extraConfig (set by Terraform).
+This module builds those YAML documents and base64-encodes them the way
+the VMware datasource expects (encoding keys = "base64").
+
+Network matching uses ``name: "e*"`` so both ``eth0`` and ``ens192`` style
+interface names work across AlmaLinux and Ubuntu goldens.
 """
 
 from __future__ import annotations
 
 import base64
-import textwrap
 from typing import Optional
 
 
 def _b64(s: str) -> str:
+    """
+    UTF-8 → base64 ASCII for guestinfo.* values.
+
+    vSphere extraConfig values are strings; base64 avoids quoting issues
+    with newlines and special characters in YAML.
+    """
     return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
 
 def build_metadata(hostname: str, domain: str = "") -> str:
-    """cloud-init metadata (YAML) for guestinfo.metadata."""
-    return textwrap.dedent(
-        f"""\
-        instance-id: {hostname}
-        local-hostname: {hostname}
-        hostname: {hostname}
-        """
+    """
+    Build cloud-init **metadata** YAML (instance-id + local-hostname).
+
+    ``domain`` is accepted for API symmetry with userdata; metadata only
+    needs a stable instance-id (we use the short hostname).
+    """
+    # domain intentionally unused in metadata body — reserved for future
+    # availability-zone style fields if needed.
+    _ = domain
+    # Trailing newline keeps YAML parsers happy.
+    return (
+        f"instance-id: {hostname}\n"
+        f"local-hostname: {hostname}\n"
+        f"hostname: {hostname}\n"
     )
 
 
@@ -36,14 +62,28 @@ def build_userdata(
     domain: str = "",
 ) -> str:
     """
-    cloud-init user-data (YAML) including network config.
+    Build cloud-init **user-data** YAML including netplan-compatible network.
 
-    Matches any Ethernet interface whose name starts with 'e' (eth0, ens192, …).
+    Parameters
+    ----------
+    hostname : short host name (also used by runcmd hostnamectl)
+    ip : IPv4 address (no mask)
+    prefix : CIDR length 0–32 (from parse_cidr_prefix)
+    gateway, dns : optional; omitted from YAML if blank
+    domain : used for FQDN and optional DNS search list
+
+    Design choices
+    --------------
+    * ``package_update/upgrade: false`` — goldens are pre-updated; first boot
+      must be fast and offline-friendly.
+    * Network match ``e*`` — covers eth* and ens*.
+    * No users:[] mutation of baked Packer accounts (almalinux / ubuntu).
     """
     fqdn = f"{hostname}.{domain}" if domain else hostname
     gw = (gateway or "").strip()
     dns1 = (dns or "").strip()
 
+    # Build YAML line-by-line so optional route/DNS blocks stay correctly indented.
     lines = [
         "#cloud-config",
         f"hostname: {hostname}",
@@ -63,6 +103,7 @@ def build_userdata(
         f"        - {ip}/{prefix}",
     ]
     if gw:
+        # Default route only when the operator supplied a gateway.
         lines += [
             "      routes:",
             "        - to: default",
@@ -78,6 +119,7 @@ def build_userdata(
 
     lines += [
         "runcmd:",
+        # Belt-and-suspenders: some images set hostname late; force it.
         f"  - [hostnamectl, set-hostname, {hostname}]",
         f'final_message: "ovbuilder cloud-init finished for {hostname}"',
         "",
@@ -94,8 +136,14 @@ def guestinfo_extra_config(
     domain: str = "",
 ) -> dict:
     """
-    Return dict suitable for vsphere_virtual_machine.extra_config
-    (guestinfo.* keys with base64 payloads).
+    Return a dict for Terraform ``extra_config`` / ``guestinfo_extra_config``.
+
+    Keys (VMware cloud-init datasource contract)
+    --------------------------------------------
+    guestinfo.metadata           — base64 metadata YAML
+    guestinfo.metadata.encoding  — "base64"
+    guestinfo.userdata           — base64 user-data YAML
+    guestinfo.userdata.encoding  — "base64"
     """
     meta = build_metadata(hostname, domain=domain)
     user = build_userdata(
