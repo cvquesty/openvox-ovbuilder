@@ -178,9 +178,22 @@ else
     PIP_CMD="$VENV_PIP"
 fi
 
-# --- Upgrade pip inside the venv (using venv python, never bare 'pip') ---
+# pip preserves source file modes. A restrictive umask (or 640 sources) leaves
+# site-packages as root:wheel mode 750/640 → non-root gets:
+#   ModuleNotFoundError: No module named 'ovbuilder.main'
+# Force a permissive umask for the install tree, then re-chmod after pip.
+if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
+    # Apply to this shell; also wrap pip with umask for sudo -H child shells.
+    umask 022
+fi
+
+# --- Upgrade pip inside the virtual environment... ---
 log_info "Upgrading pip inside the virtual environment..."
-$PIP_CMD install --quiet --no-cache-dir --upgrade pip
+if [[ "$USE_SUDO" == true && $EUID -ne 0 ]]; then
+    sudo -H bash -c "umask 022; '$VENV_PIP' install --quiet --no-cache-dir --upgrade pip"
+else
+    (umask 022; $PIP_CMD install --quiet --no-cache-dir --upgrade pip)
+fi
 
 # --- Install ovbuilder ---
 log_info "Installing ovbuilder into the virtual environment..."
@@ -195,7 +208,17 @@ else
     INSTALL_SPEC="-e ."
 fi
 
-$PIP_CMD install --quiet --no-cache-dir --force-reinstall $INSTALL_SPEC
+if [[ "$USE_SUDO" == true && $EUID -ne 0 ]]; then
+    sudo -H bash -c "umask 022; cd '$SCRIPT_DIR' && '$VENV_PIP' install --quiet --no-cache-dir --force-reinstall $INSTALL_SPEC"
+else
+    (umask 022; $PIP_CMD install --quiet --no-cache-dir --force-reinstall $INSTALL_SPEC)
+fi
+
+# Immediately fix site-packages perms (do not wait until end of script).
+if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
+    sudo chmod -R a+rX "$VENV_DIR/lib" 2>/dev/null || true
+    sudo find "$VENV_DIR/bin" -type f -perm -u+x -exec chmod a+x {} + 2>/dev/null || true
+fi
 
 log_ok "ovbuilder package installed"
 
@@ -355,6 +378,30 @@ if [[ "$USE_SUDO" == true || $EUID -eq 0 ]]; then
     sudo find "$VENV_DIR/bin" -type f -perm -u+x -exec chmod a+x {} + 2>/dev/null || true
     log_ok "Sudo install detected — full venv permissions normalized for normal user."
 fi
+
+# --- Verify import as the *invoking* user (not root) ---
+# Catches root-only site-packages (mode 750/640) that root can import fine.
+VERIFY_USER="${SUDO_USER:-$USER}"
+VERIFY_CMD="'$VENV_PYTHON' -c 'from ovbuilder.main import cli'"
+if [[ "$USE_SUDO" == true && -n "${SUDO_USER:-}" && $EUID -eq 0 ]]; then
+    if ! sudo -u "$SUDO_USER" -H bash -c "cd /tmp && $VERIFY_CMD" 2>/dev/null; then
+        log_warn "Import check as $SUDO_USER failed — re-applying a+rX on venv"
+        sudo chmod -R a+rX "$VENV_DIR" 2>/dev/null || true
+    fi
+elif [[ "$USE_SUDO" == true && $EUID -ne 0 ]]; then
+    if ! (cd /tmp && eval "$VERIFY_CMD") 2>/dev/null; then
+        log_warn "Import check failed — re-applying a+rX on venv"
+        sudo chmod -R a+rX "$VENV_DIR" 2>/dev/null || true
+    fi
+fi
+
+if ! (cd /tmp && eval "$VERIFY_CMD") 2>/dev/null; then
+    log_err "ovbuilder installed but cannot import ovbuilder.main as $VERIFY_USER."
+    log_err "Likely site-packages permissions (need world-readable under $VENV_DIR)."
+    log_err "Try: sudo chmod -R a+rX $VENV_DIR"
+    exit 1
+fi
+log_ok "Import check passed (from ovbuilder.main import cli)"
 
 # --- Verify and give PATH help ---
 if command -v ovbuilder >/dev/null 2>&1; then

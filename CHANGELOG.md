@@ -5,6 +5,15 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta2] - 2026-07-21
+
+### Fixed
+- **`ModuleNotFoundError: No module named 'ovbuilder.main'`** after system
+  install: pip preserved source modes `750`/`640` under root:wheel, so the
+  normal user could not read site-packages. `install.sh` now forces `umask
+  022` for pip, `chmod -R a+rX` immediately after install, and verifies
+  `from ovbuilder.main import cli` as the invoking user before success.
+
 ## [0.97-beta1] - 2026-07-21
 
 ### Review release (correctness, DRY, docs)
