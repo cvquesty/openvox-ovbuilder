@@ -453,7 +453,36 @@ def build(
         console.print("[red]Terraform provisioning failed.[/red]")
         raise typer.Exit(1)
 
+    def _detach_install_media(reason: str) -> None:
+        """Disconnect datastore ISO from the VM so media is not locked across reboots."""
+        if not (vsphere_server and vsphere_user and vsphere_password):
+            console.print(
+                "[yellow]Skipping media disconnect (missing vSphere credentials in this session).[/yellow]\n"
+                "[dim]Manually: VM → Edit Settings → CD/DVD → Client Device / disconnect.[/dim]"
+            )
+            return
+        console.print(f"[cyan]Disconnecting install media ({reason})…[/cyan]")
+        try:
+            si = vsphere.connect(vsphere_server, vsphere_user, vsphere_password)
+            try:
+                result = vsphere.disconnect_install_media(si, hostname)
+                if result.get("changed"):
+                    console.print(f"[green]✓ {result.get('detail')}[/green]")
+                else:
+                    console.print(f"[dim]{result.get('detail')}[/dim]")
+            finally:
+                vsphere.disconnect(si)
+        except Exception as exc:
+            console.print(
+                f"[yellow]Could not disconnect install media automatically: {exc}[/yellow]\n"
+                "[dim]Disconnect the CD/DVD ISO in vSphere before reboot so the "
+                "ISO file is not locked on the datastore.[/dim]"
+            )
+
     if provision_mode == "golden":
+        # Packer templates should already have remove_cdrom; still clear any
+        # leftover CD attachment so media cannot stay locked after clone.
+        _detach_install_media("post-clone hygiene")
         console.print(
             Panel.fit(
                 f"[bold green]VM '{hostname}' cloned from {template_name}.[/bold green]\n\n"
@@ -464,7 +493,7 @@ def build(
                 f"• OpenVox agent (after ACLs allow {cfg.openvox_server}:8140):\n"
                 f"  curl -k --noproxy {cfg.openvox_server} "
                 f"https://{cfg.openvox_server}:8140/packages/install.bash | sudo bash\n\n"
-                "[dim]No console OS install required.[/dim]",
+                "[dim]No console OS install required. Install media detached.[/dim]",
                 title="Golden clone complete",
             )
         )
@@ -504,20 +533,44 @@ def build(
         Panel.fit(
             f"[bold green]VM '{hostname}' created (ISO mode).[/bold green]\n\n"
             "1. Connect to the VM console in vSphere.\n"
-            "2. Complete the OS installation.\n"
-            f"3. Set hostname to [bold]{hostname}[/bold] and IP "
-            f"[bold]{ip}/{prefix_len}[/bold].\n"
-            "4. Ensure a sudo-capable user exists.",
+            "2. Complete the OS installation (do [bold]not[/bold] reboot yet if the "
+            "installer offers a choice — or reboot once install is fully finished).\n"
+            "3. Return here so ovbuilder can [bold]disconnect the install ISO[/bold] "
+            "(releases the datastore lock and prevents re-booting the installer).\n"
+            f"4. Then set hostname [bold]{hostname}[/bold] / IP "
+            f"[bold]{ip}/{prefix_len}[/bold] if not already done.\n"
+            "5. Ensure a sudo-capable user exists for optional agent bootstrap.",
             title="Manual OS Installation Required",
         )
     )
 
     if non_interactive:
-        console.print("[yellow]Non-interactive: skipping post-install SSH.[/yellow]")
+        console.print(
+            "[yellow]Non-interactive: not waiting for OS install. "
+            "Disconnect the CD/DVD ISO in vSphere after install before reboot, "
+            "or re-run interactively to auto-detach.[/yellow]"
+        )
         return
 
-    if not Confirm.ask("Has the OS been installed and can you SSH to the new IP?"):
-        console.print("[yellow]Exiting. Re-run later or SSH manually.[/yellow]")
+    if not Confirm.ask(
+        "Has the OS install finished? (ovbuilder will disconnect the install ISO next)"
+    ):
+        console.print(
+            "[yellow]Exiting with ISO still attached. "
+            "Disconnect media in vSphere before reboot, or re-run ovbuilder.[/yellow]"
+        )
+        return
+
+    # Critical: release datastore ISO lock before the guest reboots into the OS
+    _detach_install_media("post-install, before reboot into installed OS")
+
+    console.print(
+        "[green]Install media disconnected.[/green] "
+        "You may reboot the guest into the installed OS now if you have not already."
+    )
+
+    if not Confirm.ask("Can you SSH to the new IP for optional network/agent steps?"):
+        console.print("[yellow]Exiting. SSH later when ready.[/yellow]")
         return
 
     ssh_user = Prompt.ask("SSH username with sudo rights", default="root")

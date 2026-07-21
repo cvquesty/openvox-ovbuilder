@@ -5,6 +5,19 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-dev.2] - 2026-07-21
+
+### Fixed
+- **Install ISO left mounted after Terraform create** locked the media on the
+  datastore and could re-boot the installer on reboot.
+  - New `vsphere.disconnect_install_media()` reconfigures CD/DVD to a
+    disconnected client device (no datastore ISO) and prefers disk boot.
+  - ISO-mode flow: after OS install confirmation, ovbuilder **detaches media
+    before** optional SSH/agent steps (and before you reboot into the OS).
+  - Golden clone path: post-clone hygiene detach of any leftover CD.
+  - Terraform `from_iso` uses `lifecycle.ignore_changes = [cdrom]` so a later
+    apply does not re-attach and re-lock the ISO.
+
 ## [0.3.0-dev.1] - 2026-07-21
 
 ### Added

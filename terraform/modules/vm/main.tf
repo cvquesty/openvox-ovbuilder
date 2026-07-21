@@ -122,6 +122,9 @@ resource "vsphere_virtual_machine" "from_iso" {
     unit_number      = 0
   }
 
+  # Attach install ISO for first boot only. ovbuilder disconnects the media
+  # via pyVmomi after the OS is installed (disconnect_install_media). We
+  # ignore_changes on cdrom so a later terraform apply does not re-lock the ISO.
   cdrom {
     datastore_id = data.vsphere_datastore.iso_ds[0].id
     path         = var.iso_path
@@ -137,4 +140,10 @@ resource "vsphere_virtual_machine" "from_iso" {
   )
 
   tags = var.tags
+
+  lifecycle {
+    ignore_changes = [
+      cdrom,
+    ]
+  }
 }
