@@ -1,11 +1,13 @@
 # Packer: AlmaLinux 10 → vSphere template (NO DHCP / NO SSH)
 #
-# Dual-CD pitfall (root cause of dracut-initqueue timeouts):
-#   If kickstart is a second virtual CD (cd_content), Anaconda/dracut may treat
-#   that tiny seed ISO as "cdrom" and never find stage2 on the Alma DVD.
-#   Fix: deliver ks.cfg on a **floppy** so the only CD is the real install media.
+# Boot media layout (critical):
+#   CD1 = AlmaLinux DVD  → inst.stage2 + inst.repo via **DVD volume LABEL**
+#   CD2 = OEMDRV seed    → ks.cfg via **LABEL=OEMDRV**
 #
-# AlmaLinux / RHEL 10: all installer cmdline options need the "inst." prefix.
+# Do NOT use bare "inst.stage2=cdrom" with two CDs — dracut may bind the
+# wrong disc and hang in initqueue (or never write /tmp/ks.cfg.done).
+#
+# AlmaLinux/RHEL 10: every Anaconda cmdline option needs the "inst." prefix.
 
 packer {
   required_plugins {
@@ -46,8 +48,7 @@ variable "iso_path" {
   type    = string
   default = "Linux_ISO/AlmaLinux/10/x86_64/AlmaLinux-10.1-x86_64-dvd.iso"
 }
-# Volume label printed on the AlmaLinux DVD (isoinfo -d -i *.iso → Volume id).
-# Override if a newer ISO renames the label.
+# ISO-9660 Volume id of the AlmaLinux DVD (override if console shows a different LABEL=).
 variable "iso_label" {
   type    = string
   default = "AlmaLinux-10-1-x86_64-dvd"
@@ -97,28 +98,28 @@ source "vsphere-iso" "almalinux10" {
     disk_thin_provisioned = true
   }
 
-  # ONLY the AlmaLinux install DVD as a CD-ROM
+  # Install DVD (package repo + stage2)
   iso_paths = local.iso_paths
 
-  # Kickstart on floppy (avoids second CD stealing "cdrom" / stage2)
-  floppy_content = {
+  # Kickstart seed CD — Anaconda looks for label OEMDRV by design.
+  # Keep stage2/repo on the DVD LABEL so this disc is only for ks.cfg.
+  cd_content = {
     "ks.cfg" = file("${path.cwd}/almalinux-10/http/ks.cfg")
   }
+  cd_label = "OEMDRV"
 
   boot_wait = "15s"
   #
-  # UEFI GRUB on Alma 10 DVD: edit the default linux line and boot (Ctrl-x).
-  # Explicit LABEL for stage2/repo so dracut does not hunt the wrong device.
-  # Floppy kickstart: hd:fd0 is the virtual floppy Packer attaches.
+  # Edit UEFI GRUB linux line: force DVD for stage2/repo, OEMDRV for kickstart.
+  # All keys use mandatory "inst." prefix (AlmaLinux / RHEL 10).
   #
   boot_command = [
     "e<wait>",
     "<down><down><end><wait>",
     " inst.stage2=hd:LABEL=${var.iso_label}",
     " inst.repo=hd:LABEL=${var.iso_label}",
-    " inst.ks=hd:fd0:/ks.cfg",
+    " inst.ks=hd:LABEL=OEMDRV:/ks.cfg",
     " inst.text",
-    " inst.sshd",
     "<leftCtrlOn>x<leftCtrlOff>",
   ]
 
