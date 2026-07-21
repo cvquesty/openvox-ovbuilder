@@ -1,5 +1,7 @@
 # Packer: AlmaLinux 10 → vSphere template for ovbuilder
-# Usage: packer init . && packer build -var-file=../variables.auto.pkrvars.hcl .
+#
+# Kickstart is delivered via a second virtual CD (cd_content), NOT Packer's
+# HTTP server — the build laptop is not reachable from PDXC guest networks.
 
 packer {
   required_plugins {
@@ -12,31 +14,55 @@ packer {
 
 variable "vcenter_server" { type = string }
 variable "vcenter_username" { type = string }
-variable "vcenter_password" { type = string, sensitive = true }
+variable "vcenter_password" {
+  type      = string
+  sensitive = true
+}
 variable "datacenter" { type = string }
 variable "cluster" { type = string }
 variable "datastore" { type = string }
 variable "network" { type = string }
-variable "folder" { type = string, default = "" }
-variable "iso_datastore" { type = string, default = "" }
-variable "insecure_connection" { type = bool, default = true }
-variable "ssh_password" { type = string, default = "ChangeMe-BuildOnly!", sensitive = true }
-variable "ssh_public_key" { type = string, default = "" }
-
+variable "folder" {
+  type    = string
+  default = ""
+}
+variable "iso_datastore" {
+  type    = string
+  default = ""
+}
+variable "insecure_connection" {
+  type    = bool
+  default = true
+}
+variable "ssh_password" {
+  type      = string
+  default   = "ChangeMe-BuildOnly!"
+  sensitive = true
+}
+variable "ssh_public_key" {
+  type    = string
+  default = ""
+}
 variable "template_name" {
   type    = string
   default = "ovbuilder-almalinux-10"
 }
-
-# Datastore-relative path to the AlmaLinux 10 DVD ISO (override per site)
 variable "iso_path" {
   type    = string
-  default = "isos/AlmaLinux-10-latest-x86_64-dvd.iso"
+  default = "Linux_ISO/AlmaLinux/10/x86_64/AlmaLinux-10.1-x86_64-dvd.iso"
 }
-
-variable "cpu" { type = number, default = 2 }
-variable "memory_mb" { type = number, default = 4096 }
-variable "disk_gb" { type = number, default = 40 }
+variable "cpu" {
+  type    = number
+  default = 2
+}
+variable "memory_mb" {
+  type    = number
+  default = 4096
+}
+variable "disk_gb" {
+  type    = number
+  default = 40
+}
 
 locals {
   iso_paths = var.iso_datastore != "" ? ["[${var.iso_datastore}] ${var.iso_path}"] : ["[${var.datastore}] ${var.iso_path}"]
@@ -52,6 +78,7 @@ source "vsphere-iso" "almalinux10" {
   cluster    = var.cluster
   datastore  = var.datastore
   folder     = var.folder != "" ? var.folder : null
+
   network_adapters {
     network      = var.network
     network_card = "vmxnet3"
@@ -63,6 +90,7 @@ source "vsphere-iso" "almalinux10" {
   CPUs                 = var.cpu
   RAM                  = var.memory_mb
   disk_controller_type = ["pvscsi"]
+
   storage {
     disk_size             = var.disk_gb * 1024
     disk_thin_provisioned = true
@@ -70,20 +98,25 @@ source "vsphere-iso" "almalinux10" {
 
   iso_paths = local.iso_paths
 
-  http_directory = "${path.root}/http"
-  boot_wait      = "5s"
+  # Embed kickstart on a second ISO so the guest never needs HTTP to the laptop.
+  # Use path.cwd (packer/ when invoked as `packer build almalinux-10` from packer/).
+  cd_content = {
+    "ks.cfg" = file("${path.cwd}/almalinux-10/http/ks.cfg")
+  }
+  cd_label = "OEMDRV"
+
+  boot_wait = "8s"
+  # UEFI GRUB: append kickstart from the OEMDRV / cdrom label (RHEL finds OEMDRV automatically too)
   boot_command = [
-    "e<down><down><end><bs><bs><bs><bs><bs>",
-    " inst.ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/ks.cfg",
-    "<leftCtrlOn>x<leftCtrlOff>",
+    "e<down><down><end> inst.ks=cdrom:/dev/sr1:/ks.cfg inst.sshd<leftCtrlOn>x<leftCtrlOff>"
   ]
 
   ssh_username           = "almalinux"
   ssh_password           = var.ssh_password
-  ssh_timeout            = "45m"
-  ssh_handshake_attempts = 100
+  ssh_timeout            = "90m"
+  ssh_handshake_attempts = 200
 
-  shutdown_command = "echo '${var.ssh_password}' | sudo -S /sbin/shutdown -h now"
+  shutdown_command    = "echo '${var.ssh_password}' | sudo -S /sbin/shutdown -h now"
   convert_to_template = true
   remove_cdrom        = true
 }
