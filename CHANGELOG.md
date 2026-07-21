@@ -5,6 +5,13 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta3] - 2026-07-21
+
+### Fixed
+- **Terraform duplicate `guest_id`** in root `variables.tf` (clone-mode
+  declaration collided with legacy ISO one) — blocked `ovbuilder build`
+  at plan with "Duplicate variable declaration".
+
 ## [0.97-beta2] - 2026-07-21
 
 ### Fixed

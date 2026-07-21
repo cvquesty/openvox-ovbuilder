@@ -83,8 +83,9 @@ variable "guestinfo_extra_config" {
   default     = {}
 }
 
+# Empty: clone uses template guest_id; iso module falls back to otherLinux64Guest.
 variable "guest_id" {
-  description = "Override guest_id (empty = template default in clone mode)"
+  description = "vSphere guest OS id (empty = template default in clone mode)"
   type        = string
   default     = ""
 }
@@ -111,12 +112,6 @@ variable "disk_size_gb" {
   description = "Size of the OS disk in GB"
   type        = number
   default     = 80
-}
-
-variable "guest_id" {
-  description = "vSphere guest operating system identifier"
-  type        = string
-  default     = "rhel9_64Guest"
 }
 
 variable "firmware" {
