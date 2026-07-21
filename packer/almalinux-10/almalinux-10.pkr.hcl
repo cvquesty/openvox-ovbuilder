@@ -1,13 +1,11 @@
-# Packer: AlmaLinux 10 → vSphere template (NO DHCP / NO SSH to guest)
+# Packer: AlmaLinux 10 → vSphere template (NO DHCP / NO SSH)
 #
-# Flow:
-#   1. Attach install ISO + OEMDRV kickstart CD
-#   2. Boot, unattended install, %post bakes tools/cloud-init/cleanup
-#   3. Kickstart `poweroff` — Packer sees powered-off VM
-#   4. remove_cdrom + convert_to_template
+# Dual-CD pitfall (root cause of dracut-initqueue timeouts):
+#   If kickstart is a second virtual CD (cd_content), Anaconda/dracut may treat
+#   that tiny seed ISO as "cdrom" and never find stage2 on the Alma DVD.
+#   Fix: deliver ks.cfg on a **floppy** so the only CD is the real install media.
 #
-# Clone identity (hostname, static IP, …) is applied later by ovbuilder
-# via guestinfo / cloud-init — never during this golden build.
+# AlmaLinux / RHEL 10: all installer cmdline options need the "inst." prefix.
 
 packer {
   required_plugins {
@@ -48,6 +46,12 @@ variable "iso_path" {
   type    = string
   default = "Linux_ISO/AlmaLinux/10/x86_64/AlmaLinux-10.1-x86_64-dvd.iso"
 }
+# Volume label printed on the AlmaLinux DVD (isoinfo -d -i *.iso → Volume id).
+# Override if a newer ISO renames the label.
+variable "iso_label" {
+  type    = string
+  default = "AlmaLinux-10-1-x86_64-dvd"
+}
 variable "cpu" {
   type    = number
   default = 2
@@ -76,7 +80,6 @@ source "vsphere-iso" "almalinux10" {
   datastore  = var.datastore
   folder     = var.folder != "" ? var.folder : null
 
-  # NIC still attached so clones inherit a vNIC; no DHCP used during build.
   network_adapters {
     network      = var.network
     network_card = "vmxnet3"
@@ -94,37 +97,32 @@ source "vsphere-iso" "almalinux10" {
     disk_thin_provisioned = true
   }
 
+  # ONLY the AlmaLinux install DVD as a CD-ROM
   iso_paths = local.iso_paths
 
-  # Kickstart on second CD (no HTTP to the laptop)
-  cd_content = {
+  # Kickstart on floppy (avoids second CD stealing "cdrom" / stage2)
+  floppy_content = {
     "ks.cfg" = file("${path.cwd}/almalinux-10/http/ks.cfg")
   }
-  cd_label = "OEMDRV"
 
-  # Give UEFI GRUB time to appear on slow shared storage.
-  boot_wait = "12s"
+  boot_wait = "15s"
   #
-  # AlmaLinux / RHEL 10 Anaconda: the "inst." prefix is mandatory on all
-  # installer kernel cmdline options. Omitting inst.stage2 / inst.repo causes:
-  #   "possible causes are a missing inst.stage2 or inst.repo..."
+  # UEFI GRUB on Alma 10 DVD: edit the default linux line and boot (Ctrl-x).
+  # Explicit LABEL for stage2/repo so dracut does not hunt the wrong device.
+  # Floppy kickstart: hd:fd0 is the virtual floppy Packer attaches.
   #
-  # Media layout at boot:
-  #   sr0 (or first CD) = AlmaLinux DVD  → stage2 + package repo
-  #   OEMDRV (cd_content)                → ks.cfg
-  #
-  # Append to the DVD's default GRUB linux line, then boot (Ctrl-x).
   boot_command = [
-    "e<down><down><end>",
-    " inst.stage2=cdrom inst.repo=cdrom",
-    " inst.ks=hd:LABEL=OEMDRV:/ks.cfg",
+    "e<wait>",
+    "<down><down><end><wait>",
+    " inst.stage2=hd:LABEL=${var.iso_label}",
+    " inst.repo=hd:LABEL=${var.iso_label}",
+    " inst.ks=hd:fd0:/ks.cfg",
     " inst.text",
+    " inst.sshd",
     "<leftCtrlOn>x<leftCtrlOff>",
   ]
 
-  # No guest IP, no SSH — wait for kickstart `poweroff`.
-  communicator = "none"
-  # @core install is faster than full env groups, but still allow headroom.
+  communicator     = "none"
   shutdown_timeout = "90m"
 
   convert_to_template = true
@@ -133,5 +131,4 @@ source "vsphere-iso" "almalinux10" {
 
 build {
   sources = ["source.vsphere-iso.almalinux10"]
-  # No shell provisioners — everything is in kickstart %post.
 }
