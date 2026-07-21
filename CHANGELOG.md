@@ -5,6 +5,19 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.20] - 2026-07-21
+
+### Fixed
+- Interactive subnet prompt no longer crashes with `ValueError: invalid literal for int() ... '/19'`
+  when the operator types a leading slash (or a full CIDR / dotted netmask).
+- Any IPv4 prefix **0–32** is accepted — not limited to a short list of “common” values.
+  Valid forms: `19`, `/19`, `10.0.0.0/19`, `255.255.224.0`.
+- Invalid input re-prompts with a clear error instead of aborting the whole build.
+
+### Added
+- `ovbuilder.network.parse_cidr_prefix` / `prefix_to_netmask` helpers + unit tests.
+- CLI flags `--prefix` / `--cidr` for non-interactive builds (same free-form parsing).
+
 ## [0.2.0-dev.19] - 2026-07-15
 
 ### Changed

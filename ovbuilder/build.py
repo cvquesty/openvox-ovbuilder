@@ -16,6 +16,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from .config import get_config_manager, OvbuilderConfig
+from .network import PrefixParseError, parse_cidr_prefix, prefix_to_netmask
 from .terraform import run_terraform_apply
 from .ssh import run_post_install_steps
 from . import vsphere
@@ -38,6 +39,12 @@ def build(
     hostname: Optional[str] = typer.Option(None, "--hostname", "-H", help="VM hostname / certname"),
     ip: Optional[str] = typer.Option(None, "--ip", help="Desired IP address"),
     iso: Optional[str] = typer.Option(None, "--iso", help="Path to ISO on the ISO datastore"),
+    prefix: Optional[str] = typer.Option(
+        None,
+        "--prefix",
+        "--cidr",
+        help="IPv4 prefix length or netmask (e.g. 19, /19, 10.0.0.0/19, 255.255.224.0). Default 24.",
+    ),
     cpus: Optional[int] = typer.Option(None, "--cpus", "-c"),
     memory: Optional[int] = typer.Option(None, "--memory", "-m", help="Memory in GB"),
     disk: Optional[int] = typer.Option(None, "--disk", "-d", help="Disk size in GB (thin)"),
@@ -72,6 +79,8 @@ def build(
         ip = None
     if _is_optioninfo(iso):
         iso = None
+    if _is_optioninfo(prefix):
+        prefix = None
     if _is_optioninfo(cpus):
         cpus = None
     if _is_optioninfo(memory):
@@ -238,20 +247,29 @@ def build(
         # 3. Identity
         hostname = Prompt.ask("Hostname")
         ip = Prompt.ask("IP Address")
-        # Prefix length (CIDR): the number after the slash in 10.0.42.10/24.
-        # 24 = netmask 255.255.255.0 (typical LAN); 16 = 255.255.0.0; 8 = 255.0.0.0.
+        # Accept any IPv4 prefix 0–32. Operators may type 19, /19, 10.0.0.0/19,
+        # or a dotted mask (255.255.224.0). Re-prompt on bad input — never crash.
         console.print(
-            "[dim]Subnet prefix length (CIDR): how many network bits the IP uses.\n"
-            "  Example: IP 10.0.42.10 with prefix [bold]24[/bold] means [bold]10.0.42.10/24[/bold] "
-            "(mask 255.255.255.0).\n"
-            "  Common values: 24 (most LANs), 23, 22, 16. Do not enter the full mask.[/dim]"
+            "[dim]Subnet (CIDR): any IPv4 prefix length 0–32, or a dotted netmask.\n"
+            "  Accepted forms: [bold]19[/bold], [bold]/19[/bold], [bold]10.0.0.0/19[/bold], "
+            "[bold]255.255.224.0[/bold]\n"
+            "  Example: IP 10.0.42.10 with /24 → [bold]10.0.42.10/24[/bold] "
+            "(mask 255.255.255.0).[/dim]"
         )
-        prefix = int(
-            Prompt.ask(
-                "Subnet prefix length (e.g. 24 for /24)",
+        while True:
+            raw_prefix = Prompt.ask(
+                "Subnet prefix or netmask (e.g. 24, /19, 255.255.224.0)",
                 default="24",
             )
-        )
+            try:
+                prefix = parse_cidr_prefix(raw_prefix)
+                console.print(
+                    f"[dim]Using [bold]/{prefix}[/bold] "
+                    f"(netmask {prefix_to_netmask(prefix)})[/dim]"
+                )
+                break
+            except PrefixParseError as exc:
+                console.print(f"[red]{exc}[/red]")
         gateway = Prompt.ask("Default gateway IP (optional)", default="") or None
         dns = Prompt.ask("DNS server IP (optional)", default="") or None
 
@@ -268,7 +286,11 @@ def build(
             console.print("[red]In non-interactive mode you must supply --hostname, --ip, and --iso[/red]")
             raise typer.Exit(1)
         iso_path = iso
-        prefix = 24
+        try:
+            prefix = parse_cidr_prefix(prefix if prefix is not None else 24)
+        except PrefixParseError as exc:
+            console.print(f"[red]Invalid --prefix/--cidr: {exc}[/red]")
+            raise typer.Exit(1)
         gateway = None
         dns = None
         if cpus is None: cpus = cfg.default_cpus
