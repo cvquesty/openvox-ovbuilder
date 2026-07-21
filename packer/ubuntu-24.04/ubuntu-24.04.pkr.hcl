@@ -1,13 +1,14 @@
 # Packer: Ubuntu 24.04 → vSphere template (NO DHCP / NO SSH)
 #
-# Media:
-#   sr0 = Ubuntu live-server ISO
-#   sr1 = NoCloud seed labeled "cidata" (user-data + meta-data)
+# Media (same dual-CD pattern as Alma):
+#   sr0 = Ubuntu live-server ISO (iso_paths)
+#   sr1 = NoCloud seed labeled cidata (cd_content: user-data + meta-data)
 #
-# Language-selection hang means autoinstall never started — usually the
-# nocloud seed path was wrong (/cdrom points at the live ISO, not the seed).
-# Use the volume label path cloud-init understands:
-#   ds=nocloud;s=/dev/disk/by-label/cidata/
+# Offline seed (no Packer HTTP — guest has no DHCP/route to builder).
+# Proven vsphere-iso pattern: kernel arg is only `ds=nocloud` (no ;s=path).
+# Cloud-init then auto-discovers the volume labeled cidata/CIDATA.
+# Explicit seedfrom paths break easily: GRUB eats bare ";", and /cdrom is
+# the live ISO not the seed. See HashiCorp Discuss #69422.
 
 packer {
   required_plugins {
@@ -95,26 +96,28 @@ source "vsphere-iso" "ubuntu2404" {
 
   iso_paths = local.iso_paths
 
-  # NoCloud seed on second CD. Filenames must be exact; vendor-data optional
-  # but avoids some cloud-init probes. Volume label cidata/CIDATA is how
-  # cloud-init finds the seed when ds=nocloud has no seedfrom path.
+  # Prefer SATA CDROM — more reliable for dual-CD discovery on EFI guests.
+  cdrom_type = "sata"
+
+  # NoCloud seed on second CD. Filenames must be exactly user-data + meta-data
+  # at the ISO root. meta-data may be empty; user-data holds #cloud-config
+  # autoinstall: ... (NOT a bare autoinstall.yaml).
   cd_content = {
-    "user-data"   = file("${path.cwd}/ubuntu-24.04/http/user-data")
-    "meta-data"   = file("${path.cwd}/ubuntu-24.04/http/meta-data")
-    "vendor-data" = file("${path.cwd}/ubuntu-24.04/http/vendor-data")
+    "user-data" = file("${path.cwd}/ubuntu-24.04/http/user-data")
+    "meta-data" = file("${path.cwd}/ubuntu-24.04/http/meta-data")
   }
   cd_label = "cidata"
 
   # Catch GRUB before auto-boot (live-server timeout is short).
   boot_wait = "5s"
 
-  # GRUB command mode. Quote ds=... so GRUB does not treat ";" as a
-  # command separator (that was dropping seedfrom and hanging cloud-init).
-  # Prefer by-label over /dev/sr1 — CD order is not guaranteed.
-  # cloud-config-url=/dev/null skips network cloud-config waits.
+  # GRUB command mode (same approach as Alma). No seedfrom path — only
+  # `ds=nocloud` so cloud-init probes for the cidata-labeled volume.
+  # autoinstall goes after --- (installer args), matching working 24.04
+  # vsphere-iso reports.
   boot_command = [
     "c<wait3>",
-    "linux /casper/vmlinuz autoinstall quiet \"ds=nocloud;s=/dev/disk/by-label/cidata/\" cloud-config-url=/dev/null ---<enter><wait3>",
+    "linux /casper/vmlinuz --- autoinstall ds=nocloud<enter><wait3>",
     "initrd /casper/initrd<enter><wait3>",
     "boot<enter>",
   ]
