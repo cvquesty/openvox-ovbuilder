@@ -107,12 +107,18 @@ source "vsphere-iso" "almalinux10" {
   # Wait for UEFI GRUB from the DVD
   boot_wait = "20s"
 
-  # Do NOT rewrite stage2/repo — DVD defaults are correct on Alma 10.
-  # Boot the highlighted GRUB entry (Enter). OEMDRV supplies kickstart automatically.
-  # Fallback: if menu needs a key, send Enter twice with waits.
+  # DVD GRUB already has correct inst.stage2/inst.repo for Alma 10.
+  # OEMDRV auto-load is unreliable in this dual-CD VMware layout, so we
+  # *append only* kickstart (do not replace stage2/repo — that caused dracut hangs).
+  #
+  # GRUB edit: open entry → move to kernel line end → append → boot (Ctrl-x).
   boot_command = [
-    "<enter><wait30s>",
-    "<enter><wait>",
+    "e<wait>",
+    "<down><down><end><wait>",
+    " inst.ks=hd:LABEL=OEMDRV:/ks.cfg",
+    " inst.text",
+    " inst.cmdline",
+    "<leftCtrlOn>x<leftCtrlOff>",
   ]
 
   communicator     = "none"
