@@ -5,6 +5,22 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.21] - 2026-07-21
+
+### Fixed
+- **Building a new VM no longer renames/overwrites the previous one.**  
+  Root cause: a single shared `terraform/terraform.tfstate` tracked one
+  `module.vm` resource. Changing `vm_name` from `ovca2` → `ovca3` was an
+  in-place update (vSphere rename), not a create.  
+  **Fix:** each hostname gets isolated state under
+  `~/.local/share/ovbuilder/tfstate/<vm_name>/terraform.tfstate`.  
+  Legacy shared state is migrated once into the per-VM path for the VM it
+  currently tracks.
+
+### Added
+- Clear console messages showing which state file apply uses.
+- `run_terraform_destroy()` helper for per-VM teardown (same state path).
+
 ## [0.2.0-dev.20] - 2026-07-21
 
 ### Fixed
