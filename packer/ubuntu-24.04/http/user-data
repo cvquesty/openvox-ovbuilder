@@ -29,18 +29,17 @@ autoinstall:
             name: "e*"
           dhcp4: false
           optional: true
+  # Minimal additive list (base is already server-minimal from live-server ISO)
   packages:
     - open-vm-tools
     - cloud-init
     - cloud-guest-utils
-    - qemu-guest-agent
     - curl
-    - wget
-    - vim-tiny
   user-data:
     disable_root: false
     package_update: false
     package_upgrade: false
+
     users:
       - name: ubuntu
         groups: [sudo]

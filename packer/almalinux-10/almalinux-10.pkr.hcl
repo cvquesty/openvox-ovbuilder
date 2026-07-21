@@ -102,15 +102,18 @@ source "vsphere-iso" "almalinux10" {
   }
   cd_label = "OEMDRV"
 
-  boot_wait = "8s"
+  # Give UEFI GRUB time to appear on slow shared storage.
+  boot_wait = "12s"
+  # Prefer LABEL=OEMDRV (Packer cd_label) — more reliable than /dev/sr1 paths.
+  # Anaconda also auto-scans OEMDRV; explicit inst.ks keeps it deterministic.
   boot_command = [
-    "e<down><down><end> inst.ks=cdrom:/dev/sr1:/ks.cfg<leftCtrlOn>x<leftCtrlOff>"
+    "e<down><down><end> inst.ks=hd:LABEL=OEMDRV:/ks.cfg inst.text<leftCtrlOn>x<leftCtrlOff>"
   ]
 
   # No guest IP, no SSH — wait for kickstart `poweroff`.
   communicator = "none"
-  # Full DVD install + %post can take well over 5m on shared storage.
-  shutdown_timeout = "120m"
+  # @core install is faster than full env groups, but still allow headroom.
+  shutdown_timeout = "90m"
 
   convert_to_template = true
   remove_cdrom        = true
