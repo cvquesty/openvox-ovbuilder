@@ -1,6 +1,5 @@
 # =============================================================================
-# ITSYS VMware VM Provisioner (ISO-based)
-# Variables for the reusable VM module
+# ovbuilder VM module variables
 # =============================================================================
 
 variable "vm_name" {
@@ -23,15 +22,32 @@ variable "vm_datastore" {
   type        = string
 }
 
+variable "provision_mode" {
+  description = "clone = Packer golden template; iso = legacy empty disk + ISO"
+  type        = string
+  default     = "clone"
+  validation {
+    condition     = contains(["clone", "iso"], var.provision_mode)
+    error_message = "provision_mode must be \"clone\" or \"iso\"."
+  }
+}
+
+variable "template_name" {
+  description = "vSphere template name (required when provision_mode = clone)"
+  type        = string
+  default     = ""
+}
+
 variable "iso_datastore" {
-  description = "Datastore containing the OS ISO images. Defaults to vm_datastore if not set."
+  description = "Datastore containing OS ISOs (iso mode). Defaults to vm_datastore."
   type        = string
   default     = null
 }
 
 variable "iso_path" {
-  description = "Path to the ISO file on the iso_datastore (e.g. isos/almalinux-9.4-x86_64-dvd.iso). Must start with / if full path from datastore root."
+  description = "Path to ISO on iso_datastore (iso mode only)"
   type        = string
+  default     = ""
 }
 
 variable "networks" {
@@ -53,19 +69,19 @@ variable "memory_mb" {
 }
 
 variable "disk_size_gb" {
-  description = "Size of the primary OS disk in GB"
+  description = "Size of the primary OS disk in GB (must be >= template disk in clone mode)"
   type        = number
   default     = 80
 }
 
 variable "guest_id" {
-  description = "vSphere guest ID (e.g. rhel9_64Guest, centos9_64Guest, ubuntu64Guest, otherLinux64Guest). Use PowerCLI or docs to find valid values for your hosts."
+  description = "vSphere guest ID (empty = inherit from template in clone mode)"
   type        = string
-  default     = "rhel9_64Guest"
+  default     = ""
 }
 
 variable "firmware" {
-  description = "Firmware type. 'efi' (recommended for modern OS) or 'bios'."
+  description = "Firmware type: efi or bios"
   type        = string
   default     = "efi"
   validation {
@@ -81,31 +97,49 @@ variable "efi_secure_boot_enabled" {
 }
 
 variable "folder" {
-  description = "Optional VM folder path relative to datacenter (e.g. ITSYS/Dev). Leave empty for root."
+  description = "Optional VM folder path relative to datacenter"
   type        = string
   default     = ""
 }
 
 variable "domain" {
-  description = "DNS domain suffix (used for linux_options if customization is added later)"
+  description = "DNS domain suffix"
   type        = string
   default     = "example.com"
 }
 
 variable "boot_delay_ms" {
-  description = "Milliseconds to wait before starting boot sequence. Useful to ensure ISO is attached and detected."
+  description = "ISO mode: ms to wait before boot so CD-ROM is detected"
   type        = number
   default     = 10000
 }
 
 variable "tags" {
-  description = "Set of tag IDs (not names) to apply to the VM. Leave empty unless you manage tags via Terraform or know the IDs."
+  description = "Set of tag IDs to apply to the VM"
   type        = set(string)
   default     = []
 }
 
 variable "enable_disk_uuid" {
-  description = "Expose disk UUIDs to the guest (disk.EnableUUID). Useful for some storage scenarios."
+  description = "Expose disk UUIDs to the guest (disk.EnableUUID)"
   type        = bool
   default     = false
+}
+
+variable "guestinfo_extra_config" {
+  description = "Map of extra_config keys for cloud-init guestinfo (clone mode)"
+  type        = map(string)
+  default     = {}
+}
+
+variable "wait_for_guest_net_timeout" {
+  description = "Clone mode: minutes to wait for guest network (0 = do not wait/fail)"
+  type        = number
+  default     = 0
+}
+
+variable "wait_for_guest_ip_timeout" {
+  description = "Clone mode: minutes to wait for guest IP (0 = do not wait/fail)"
+  type        = number
+  default     = 0
 }

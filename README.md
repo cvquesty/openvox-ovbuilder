@@ -4,7 +4,7 @@
 
 **The OpenVox-native CLI for building VMware VMs from ISO images — fast, repeatable, and a little bit magical.**
 
-[![Version](https://img.shields.io/badge/version-0.2.0--dev.22-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0--dev.1-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Typer](https://img.shields.io/badge/Typer-0.12+-blue?style=for-the-badge&logo=python&logoColor=white)](https://typer.tiangolo.com)
@@ -43,7 +43,7 @@ It follows the same modern, noun-verb, operator-first philosophy as the `ovox` C
 
 | Component              | Version       | Notes |
 |------------------------|---------------|-------|
-| **ovbuilder CLI**      | `0.2.0-dev.22` | Typer + Rich + pyVmomi. Live vCenter discovery. |
+| **ovbuilder CLI**      | `0.3.0-dev.1` | Typer + Rich + pyVmomi. Live vCenter discovery. |
 | **Terraform Module**   | 1.x (bundled) | VMware vSphere ISO boot + thin disks + EFI. Lives in `terraform/modules/vm/`. |
 | **Python Runtime**     | 3.9+          | Typer ≥0.12, Rich ≥13, Paramiko ≥3, pyVmomi ≥8. |
 | **Post-Install**       | —             | Hostname + static IP (nmcli/netplan best-effort) + official OpenVox `install.bash`. |
@@ -111,25 +111,29 @@ In non-interactive mode, datacenter / cluster / datastores / networks come from 
 
 ## ✨ Features
 
-- **Live vSphere discovery** — datacenters, clusters, datastores, networks, and ISOs via pyVmomi (not hardcoded paths)
-- **Interactive tables** for every inventory choice, plus manual fallback if discovery fails
-- **Thin-provisioned disks** always
-- **Post-install SSH automation** — hostname, IP, OpenVox agent bootstrap
-- **Self-contained** — bundled Terraform module + `install.sh`
+- **Packer golden images** — AlmaLinux 10 + Ubuntu 24.04 templates (`packer/`)
+- **Default golden clone path** — pick OS → interview → clone + cloud-init identity (SSH-ready)
+- **Per-VM Terraform state** — building ovca3 never renames ovca2
+- **Live vSphere discovery** — datacenters, clusters, datastores, networks via pyVmomi
+- **Legacy ISO mode** still available (`--mode iso`)
+- **Optional OpenVox agent bootstrap** over SSH after ACLs allow
+- **Self-contained** — bundled Terraform module + `install.sh` + Packer defs
 - **ovox design language** — Typer + Rich, XDG config, same vibe
 
 ## 📚 How It Works
 
-1. You provide vCenter credentials (or pass flags).
-2. ovbuilder connects with pyVmomi and builds selection menus from real inventory.
-3. You pick ISO, hostname/IP, and sizing.
-4. ovbuilder assembles `TF_VAR_*` / `-var` values and runs `terraform apply` against the bundled module.
-5. **Terraform state is isolated per hostname** under
-   `~/.local/share/ovbuilder/tfstate/<hostname>/terraform.tfstate`
-   so building `ovca3` never renames or updates `ovca2`.
-6. The VM boots your chosen ISO with a boot delay and the CD-ROM attached.
-7. You complete the OS install in the vSphere console.
-8. ovbuilder waits for SSH, configures network bits it can, and runs the OpenVox registration script.
+### Golden path (default)
+
+1. Build Packer templates once (`packer/README.md`) → `ovbuilder-almalinux-10` / `ovbuilder-ubuntu-24.04`.
+2. `ovbuilder build` — credentials + inventory discovery.
+3. **Select OS** (golden image) → interview hostname, IP, CIDR, gateway, DNS, sizing.
+4. Terraform **clones** the template with **per-VM state** and injects cloud-init guestinfo.
+5. VM boots; cloud-init applies hostname + static IP → **ready for SSH login**.
+6. When firewall/ACLs allow, install the OpenVox agent (optional prompt or manual curl).
+
+### Legacy ISO path (`--mode iso` or `provision_mode: iso`)
+
+Empty disk + ISO attach → console OS install → optional SSH post-steps (as before).
 
 ## 🛠️ Configuration
 

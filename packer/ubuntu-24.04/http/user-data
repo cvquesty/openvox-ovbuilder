@@ -1,0 +1,60 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  identity:
+    hostname: ovbuilder-ubuntu-build
+    username: ubuntu
+    # password: ChangeMe-BuildOnly!  (openssl passwd -6)
+    password: "$6$RaFy6HOCllXP3RLw$7aJ8pbBtpNJuI.b/UZG.AYHihuCm.x4nmcN0m2oZq2SWmdG1GB3LQsKCzkR7T70vdH6zmcydtGBtUANq6KU4K."
+  ssh:
+    install-server: true
+    allow-pw: true
+  storage:
+    layout:
+      name: direct
+  network:
+    network:
+      version: 2
+      ethernets:
+        any:
+          match:
+            name: "e*"
+          dhcp4: true
+  packages:
+    - open-vm-tools
+    - cloud-init
+    - cloud-guest-utils
+    - qemu-guest-agent
+    - curl
+    - wget
+    - vim-tiny
+  user-data:
+    disable_root: false
+    package_update: true
+    users:
+      - name: ubuntu
+        groups: [sudo]
+        shell: /bin/bash
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        lock_passwd: false
+    chpasswd:
+      expire: false
+      list:
+        - ubuntu:ChangeMe-BuildOnly!
+    runcmd:
+      - systemctl enable open-vm-tools.service || true
+      - |
+        mkdir -p /etc/cloud/cloud.cfg.d
+        cat >/etc/cloud/cloud.cfg.d/99-ovbuilder-vmware.cfg <<'EOF'
+        datasource_list: [ VMware, OVF, None ]
+        datasource:
+          VMware:
+            allow_raw_data: true
+        EOF
+  late-commands:
+    - echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/ubuntu
+    - chmod 440 /target/etc/sudoers.d/ubuntu
+    - curtin in-target --target=/target -- systemctl enable open-vm-tools.service || true

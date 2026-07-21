@@ -16,7 +16,7 @@ Environment overrides:
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -25,13 +25,39 @@ DEFAULT_CONFIG_DIR = Path.home() / ".config" / "ovbuilder"
 DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "ovbuilder"
 
 
+class GoldenImage(BaseModel):
+    """One Packer-built vSphere template available in the OS picker."""
+
+    template: str
+    guest_id: str = ""
+    default_user: str = "root"
+    description: str = ""
+
+
+def _default_golden_images() -> Dict[str, GoldenImage]:
+    return {
+        "almalinux-10": GoldenImage(
+            template="ovbuilder-almalinux-10",
+            guest_id="other4xLinux64Guest",
+            default_user="almalinux",
+            description="AlmaLinux 10 (Packer golden)",
+        ),
+        "ubuntu-24.04": GoldenImage(
+            template="ovbuilder-ubuntu-24.04",
+            guest_id="ubuntu64Guest",
+            default_user="ubuntu",
+            description="Ubuntu 24.04 LTS (Packer golden)",
+        ),
+    }
+
+
 class OvbuilderConfig(BaseModel):
     """Persisted configuration for ovbuilder."""
 
     # Terraform
     terraform_dir: str = Field(
         default="",
-        description="Path to the directory containing the Terraform root module for VM provisioning (defaults to bundled ./terraform if not set)"
+        description="Path to the Terraform root module (defaults to bundled ./terraform)",
     )
     vsphere_server: str = "vcenter.example.com"
     vm_datastore: str = "vsanDatastore"
@@ -43,7 +69,7 @@ class OvbuilderConfig(BaseModel):
     folder: str = ""
     firmware: str = "efi"
 
-    # OpenVox registration target (used in post-provision step)
+    # OpenVox registration target (post-provision optional step)
     openvox_server: str = "openvox.example.com"
 
     # Defaults for interactive builds
@@ -51,7 +77,13 @@ class OvbuilderConfig(BaseModel):
     default_memory_gb: int = 4
     default_disk_gb: int = 80
 
-    # Known ISOs (name -> path on iso_datastore)
+    # golden = Packer templates (default); iso = legacy empty disk + ISO
+    provision_mode: str = "golden"
+
+    # Packer goldens (key shown in OS picker)
+    golden_images: Dict[str, GoldenImage] = Field(default_factory=_default_golden_images)
+
+    # Known ISOs (legacy iso mode only)
     known_isos: Dict[str, str] = Field(
         default_factory=lambda: {
             "AlmaLinux 9.4": "isos/AlmaLinux-9.4-x86_64-dvd.iso",
@@ -88,13 +120,20 @@ class ConfigManager:
             try:
                 raw = yaml.safe_load(self.config_file.read_text(encoding="utf-8")) or {}
                 if isinstance(raw, dict):
-                    # Only take fields that exist in the model
                     valid = {k: v for k, v in raw.items() if k in cfg.model_fields}
+                    # Nested golden_images dict → GoldenImage models
+                    if "golden_images" in valid and isinstance(valid["golden_images"], dict):
+                        gi = {}
+                        for key, val in valid["golden_images"].items():
+                            if isinstance(val, dict):
+                                gi[key] = GoldenImage(**val)
+                            elif isinstance(val, GoldenImage):
+                                gi[key] = val
+                        valid["golden_images"] = gi
                     cfg = OvbuilderConfig(**{**cfg.model_dump(), **valid})
             except Exception:
                 pass
 
-        # Env overrides (common ones)
         if td := os.environ.get("OVBUILDER_TERRAFORM_DIR"):
             cfg.terraform_dir = td
         if ds := os.environ.get("OVBUILDER_VM_DATASTORE"):
@@ -103,6 +142,8 @@ class ConfigManager:
             cfg.iso_datastore = ids
         if srv := os.environ.get("OVBUILDER_OPENVox_SERVER"):
             cfg.openvox_server = srv
+        if mode := os.environ.get("OVBUILDER_PROVISION_MODE"):
+            cfg.provision_mode = mode.strip().lower()
 
         return cfg
 
@@ -116,20 +157,16 @@ class ConfigManager:
         if cfg.terraform_dir:
             return Path(cfg.terraform_dir).expanduser().resolve()
 
-        # Check standard installed locations first (populated by install.sh)
         for base in ("/opt/ovbuilder", Path.home() / ".local/share/ovbuilder"):
             candidate = Path(base) / "terraform"
             if candidate.exists() and (candidate / "main.tf").exists():
                 return candidate
 
-        # Default to the bundled terraform/ directory inside this project
-        # (self-contained repo with modules/vm for ISO provisioning)
-        here = Path(__file__).resolve().parent.parent  # ovbuilder/ovbuilder/ -> ovbuilder/
+        here = Path(__file__).resolve().parent.parent
         bundled = here / "terraform"
         if bundled.exists() and (bundled / "main.tf").exists():
             return bundled
 
-        # Fallback for development in larger workspace
         candidate = here.parent / "itsys"
         if candidate.exists() and (candidate / "main.tf").exists():
             return candidate

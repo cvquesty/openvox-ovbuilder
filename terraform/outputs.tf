@@ -21,3 +21,11 @@ output "iso_attached" {
   description = "ISO that was attached for installation"
   value       = module.vm.iso_attached
 }
+
+output "provision_mode" {
+  value = module.vm.provision_mode
+}
+
+output "template_name" {
+  value = module.vm.template_name
+}

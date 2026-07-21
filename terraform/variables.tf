@@ -60,8 +60,33 @@ variable "iso_datastore" {
 }
 
 variable "iso_path" {
-  description = "Path to the ISO inside iso_datastore (example: isos/AlmaLinux-9.4-x86_64-dvd.iso)"
+  description = "Path to the ISO inside iso_datastore (iso mode only)"
   type        = string
+  default     = ""
+}
+
+variable "provision_mode" {
+  description = "clone (Packer golden) or iso (legacy)"
+  type        = string
+  default     = "clone"
+}
+
+variable "template_name" {
+  description = "vSphere template name when provision_mode = clone"
+  type        = string
+  default     = ""
+}
+
+variable "guestinfo_extra_config" {
+  description = "cloud-init guestinfo map (base64 payloads) for clone mode"
+  type        = map(string)
+  default     = {}
+}
+
+variable "guest_id" {
+  description = "Override guest_id (empty = template default in clone mode)"
+  type        = string
+  default     = ""
 }
 
 variable "networks" {

@@ -5,6 +5,25 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-dev.1] - 2026-07-21
+
+### Added
+- **Packer golden images** for **AlmaLinux 10** and **Ubuntu 24.04**
+  (`packer/almalinux-10`, `packer/ubuntu-24.04`) with shared cleanup scripts
+  and VMware cloud-init guestinfo datasource config.
+- **Default provision mode: `golden`** — select OS → interview (hostname, IP,
+  CIDR, gateway, DNS, sizing) → Terraform **clones the Packer template** and
+  injects identity via cloud-init guestinfo. VM is ready for SSH login;
+  OpenVox agent install is optional after ACLs allow access to the server.
+- Config keys: `provision_mode`, `golden_images` (template name, guest_id,
+  default_user per OS).
+- CLI: `--os`, `--mode golden|iso`, `--gateway`, `--dns`.
+- Terraform module dual-mode: `clone` (template) vs `iso` (legacy).
+
+### Docs
+- `packer/README.md` — build prerequisites, vars, rebuild cadence.
+- Operator flow documented in main README.
+
 ## [0.2.0-dev.22] - 2026-07-21
 
 ### Fixed

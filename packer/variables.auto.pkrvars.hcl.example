@@ -1,0 +1,24 @@
+# Copy to variables.auto.pkrvars.hcl (gitignored) or export PKR_VAR_* instead.
+# Never commit real passwords.
+
+vcenter_server   = "vcenter.example.com"
+vcenter_username = "administrator@vsphere.local"
+vcenter_password = "change-me"
+
+datacenter = "Main DC"
+cluster    = "Production Cluster"
+datastore  = "vsanDatastore"
+network    = "VM Network"
+folder     = "Templates"
+
+# Optional: where ISOs live on the datastore (used if iso_path is relative)
+iso_datastore = "isos"
+
+# Build-time insecure SSL (lab only)
+insecure_connection = true
+
+# Default login password baked into goldens (change immediately in prod)
+ssh_password = "ChangeMe-BuildOnly!"
+
+# Optional: inject your public key into the golden
+# ssh_public_key = "ssh-ed25519 AAAA... you@example.com"

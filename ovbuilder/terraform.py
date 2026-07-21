@@ -1,18 +1,13 @@
 """
 Terraform driver for ovbuilder.
 
-Runs the bundled (or configured) Terraform root module with the correct
-variables and environment for vSphere auth.
-
-CRITICAL: each VM gets its own local Terraform state file under
+Per-VM local state under:
   $XDG_DATA_HOME/ovbuilder/tfstate/<vm_name>/terraform.tfstate
-so that building ovca3 never renames/updates ovca2. A single shared
-state file was the previous bug (Terraform treated vm_name as an
-in-place update of module.vm).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -21,16 +16,14 @@ from typing import Dict, Optional
 
 from rich.console import Console
 
-from .config import ConfigManager, OvbuilderConfig, get_config_manager
+from .config import OvbuilderConfig, get_config_manager
 
 console = Console()
 
-# Terraform resource address is always module.vm — isolation is via state path.
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def sanitize_state_key(vm_name: str) -> str:
-    """Filesystem-safe key for per-VM state directories."""
     key = (vm_name or "unnamed").strip()
     key = _SAFE_NAME.sub("_", key)
     key = key.strip("._-") or "unnamed"
@@ -38,7 +31,6 @@ def sanitize_state_key(vm_name: str) -> str:
 
 
 def state_dir_for_vm(vm_name: str, data_dir: Optional[Path] = None) -> Path:
-    """Return ~/.local/share/ovbuilder/tfstate/<vm>/ (or XDG_DATA_HOME)."""
     if data_dir is None:
         data_dir = get_config_manager().data_dir
     path = Path(data_dir) / "tfstate" / sanitize_state_key(vm_name)
@@ -51,10 +43,7 @@ def state_file_for_vm(vm_name: str, data_dir: Optional[Path] = None) -> Path:
 
 
 def _vm_name_from_state_file(state_path: Path) -> Optional[str]:
-    """Best-effort read of vsphere_virtual_machine name from a local state file."""
     try:
-        import json
-
         data = json.loads(state_path.read_text(encoding="utf-8"))
         for resource in data.get("resources") or []:
             if resource.get("type") != "vsphere_virtual_machine":
@@ -69,10 +58,6 @@ def _vm_name_from_state_file(state_path: Path) -> Optional[str]:
 
 
 def migrate_legacy_shared_state(tf_dir: Path) -> None:
-    """
-    Move the old single terraform.tfstate in the module directory into the
-    per-VM path once, so existing inventory is not abandoned.
-    """
     legacy = tf_dir / "terraform.tfstate"
     if not legacy.is_file():
         return
@@ -85,14 +70,12 @@ def migrate_legacy_shared_state(tf_dir: Path) -> None:
     vm_name = _vm_name_from_state_file(legacy)
     if not vm_name:
         console.print(
-            f"[yellow]Legacy state at {legacy} has no VM name; leave it in place "
-            "and inspect manually.[/yellow]"
+            f"[yellow]Legacy state at {legacy} has no VM name; leave it for manual review.[/yellow]"
         )
         return
 
     dest = state_file_for_vm(vm_name)
     if dest.exists():
-        # Per-VM state already present — rename legacy aside so it is not reused
         aside = legacy.with_suffix(".tfstate.legacy-shared")
         try:
             legacy.rename(aside)
@@ -115,15 +98,13 @@ def migrate_legacy_shared_state(tf_dir: Path) -> None:
             backup.rename(dest.with_suffix(".tfstate.backup"))
         console.print(
             f"[green]Migrated legacy shared Terraform state → {dest}[/green]\n"
-            f"[dim]Tracked VM: {vm_name}. Future builds of other hostnames "
-            "will use separate state files and will not rename this VM.[/dim]"
+            f"[dim]Tracked VM: {vm_name}.[/dim]"
         )
     except OSError as exc:
         console.print(f"[yellow]Could not migrate legacy state: {exc}[/yellow]")
 
 
 def ensure_terraform_init(tf_dir: Path, env: dict) -> bool:
-    """Run terraform init -input=false if providers are not yet installed."""
     terraform_dir = tf_dir / ".terraform"
     if terraform_dir.is_dir() and any(terraform_dir.iterdir()):
         return True
@@ -141,6 +122,15 @@ def ensure_terraform_init(tf_dir: Path, env: dict) -> bool:
         return False
 
 
+def _write_var_file(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
 def run_terraform_apply(
     tf_dir: Path,
     vars: Dict,
@@ -148,108 +138,96 @@ def run_terraform_apply(
     vsphere_user: Optional[str] = None,
     vsphere_password: Optional[str] = None,
 ) -> bool:
-    """
-    Execute terraform apply against the given module.
-
-    Sensitive values are passed via TF_VAR_* environment variables.
-    State is isolated per vm_name so each build creates a new VM.
-    """
+    """Execute terraform apply with per-VM state + JSON var-file."""
     if not (tf_dir / "main.tf").exists():
         console.print(f"[red]No Terraform root module found at {tf_dir}[/red]")
         return False
 
     vm_name = vars.get("vm_name") or "unnamed"
-    state_path = state_file_for_vm(vm_name)
-    backup_path = state_path.with_suffix(".tfstate.backup")
+    sdir = state_dir_for_vm(vm_name)
+    state_path = sdir / "terraform.tfstate"
+    backup_path = sdir / "terraform.tfstate.backup"
+    var_file = sdir / "ovbuilder.auto.tfvars.json"
 
     env = os.environ.copy()
 
-    # Pass non-sensitive config. Prefer values from vars (discovery) over cfg defaults.
-    env["TF_VAR_vsphere_datacenter"] = vars.get("datacenter", config.datacenter)
-    env["TF_VAR_vsphere_cluster"] = vars.get("cluster", config.cluster)
-    env["TF_VAR_vm_datastore"] = vars.get("vm_datastore", config.vm_datastore)
-    env["TF_VAR_iso_datastore"] = vars.get("iso_datastore", config.iso_datastore)
-    env["TF_VAR_domain"] = config.domain
-    env["TF_VAR_folder"] = config.folder
-    env["TF_VAR_firmware"] = config.firmware
+    effective_user = vsphere_user or vars.get("vsphere_user")
+    effective_password = vsphere_password or vars.get("vsphere_password")
+    effective_server = vars.get("vsphere_server") or getattr(config, "vsphere_server", None)
+
+    if effective_user:
+        env["TF_VAR_vsphere_user"] = str(effective_user)
+        env["VSPHERE_USER"] = str(effective_user)
+    if effective_password:
+        env["TF_VAR_vsphere_password"] = str(effective_password)
+        env["VSPHERE_PASSWORD"] = str(effective_password)
+    if effective_server:
+        env["TF_VAR_vsphere_server"] = str(effective_server)
+        env["VSPHERE_SERVER"] = str(effective_server)
 
     if not ensure_terraform_init(tf_dir, env):
         return False
 
-    # One-time: move old shared terraform.tfstate out of the module dir
     migrate_legacy_shared_state(tf_dir)
-    # Re-resolve path in case migration just created it for this vm_name
     state_path = state_file_for_vm(vm_name)
     backup_path = state_path.with_suffix(".tfstate.backup")
+
+    provision_mode = vars.get("provision_mode") or "clone"
+    # CLI uses golden/iso; Terraform expects clone/iso
+    if provision_mode == "golden":
+        provision_mode = "clone"
+
+    tf_payload = {
+        "vsphere_user": effective_user or "",
+        "vsphere_password": effective_password or "",
+        "vsphere_server": effective_server or config.vsphere_server,
+        "vsphere_allow_unverified_ssl": True,
+        "vsphere_datacenter": vars.get("datacenter", config.datacenter),
+        "vsphere_cluster": vars.get("cluster", config.cluster),
+        "vm_datastore": vars.get("vm_datastore", config.vm_datastore),
+        "iso_datastore": vars.get("iso_datastore", config.iso_datastore),
+        "vm_name": vm_name,
+        "iso_path": vars.get("iso_path") or "",
+        "provision_mode": provision_mode,
+        "template_name": vars.get("template_name") or "",
+        "guest_id": vars.get("guest_id") or "",
+        "guestinfo_extra_config": vars.get("guestinfo_extra_config") or {},
+        "num_cpus": int(vars.get("num_cpus", config.default_cpus)),
+        "memory_mb": int(vars.get("memory_mb", config.default_memory_gb * 1024)),
+        "disk_size_gb": int(vars.get("disk_size_gb", config.default_disk_gb)),
+        "networks": vars.get("networks") or config.networks,
+        "domain": config.domain,
+        "folder": config.folder,
+        "firmware": config.firmware,
+    }
+    _write_var_file(var_file, tf_payload)
 
     cmd = [
         "terraform",
         "apply",
         "-auto-approve",
         "-input=false",
-        # Per-VM local state — never reuse the module dir's default terraform.tfstate
         f"-state={state_path}",
         f"-state-out={state_path}",
         f"-backup={backup_path}",
+        f"-var-file={var_file}",
     ]
 
-    # Always carry auth credentials forward explicitly.
-    effective_user = vsphere_user or vars.get("vsphere_user")
-    effective_password = vsphere_password or vars.get("vsphere_password")
-    effective_server = vars.get("vsphere_server") or getattr(config, "vsphere_server", None)
-
-    if effective_user:
-        env["TF_VAR_vsphere_user"] = effective_user
-        env["VSPHERE_USER"] = effective_user
-        cmd += [f"-var=vsphere_user={effective_user}"]
-    if effective_password:
-        env["TF_VAR_vsphere_password"] = effective_password
-        env["VSPHERE_PASSWORD"] = effective_password
-        cmd += [f"-var=vsphere_password={effective_password}"]
-
-    if effective_server:
-        env["TF_VAR_vsphere_server"] = effective_server
-        env["VSPHERE_SERVER"] = effective_server
-        cmd += [f"-var=vsphere_server={effective_server}"]
-
-    # VM specific
-    cmd += [f"-var=vm_name={vars['vm_name']}"]
-    cmd += [f"-var=iso_path={vars['iso_path']}"]
-    cmd += [f"-var=num_cpus={vars['num_cpus']}"]
-    cmd += [f"-var=memory_mb={vars['memory_mb']}"]
-    cmd += [f"-var=disk_size_gb={vars['disk_size_gb']}"]
-
-    if vars.get("datacenter"):
-        cmd += [f"-var=vsphere_datacenter={vars['datacenter']}"]
-    if vars.get("cluster"):
-        cmd += [f"-var=vsphere_cluster={vars['cluster']}"]
-    if vars.get("vm_datastore"):
-        cmd += [f"-var=vm_datastore={vars['vm_datastore']}"]
-    if vars.get("iso_datastore"):
-        cmd += [f"-var=iso_datastore={vars['iso_datastore']}"]
-
-    networks_hcl = ",".join(f'"{n}"' for n in vars.get("networks", config.networks))
-    cmd += [f"-var=networks=[{networks_hcl}]"]
-
     console.print(f"[cyan]Running Terraform in {tf_dir}[/cyan]")
-    console.print(f"[dim]State (isolated per VM): {state_path}[/dim]")
+    console.print(f"[dim]Mode: {provision_mode} | State: {state_path}[/dim]")
+    if provision_mode == "clone":
+        console.print(f"[dim]Template: {tf_payload.get('template_name')}[/dim]")
     if state_path.exists():
         console.print(
-            "[dim]Existing state for this hostname — apply will update "
-            f"[bold]{vm_name}[/bold] only, not other VMs.[/dim]"
+            f"[dim]Existing state for [bold]{vm_name}[/bold] — update that VM only.[/dim]"
         )
     else:
-        console.print(
-            f"[dim]New state for [bold]{vm_name}[/bold] — a new VM will be created.[/dim]"
-        )
+        console.print(f"[dim]New state for [bold]{vm_name}[/bold] — create.[/dim]")
 
-    # Warn if legacy shared state still exists in the module dir (old installs)
     legacy = tf_dir / "terraform.tfstate"
     if legacy.exists():
         console.print(
-            "[yellow]Note: legacy shared state still exists at "
-            f"{legacy}. New builds no longer use it. See CHANGELOG / README "
-            "for recovery if a previous apply renamed a VM.[/yellow]"
+            f"[yellow]Note: leftover shared state at {legacy} is ignored for new builds.[/yellow]"
         )
 
     try:
@@ -257,57 +235,4 @@ def run_terraform_apply(
         return True
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Terraform exited with code {e.returncode}[/red]")
-        return False
-
-
-def run_terraform_destroy(
-    tf_dir: Path,
-    vm_name: str,
-    config: OvbuilderConfig,
-    vsphere_user: Optional[str] = None,
-    vsphere_password: Optional[str] = None,
-    vsphere_server: Optional[str] = None,
-) -> bool:
-    """Destroy a single VM using its isolated state file (if present)."""
-    state_path = state_file_for_vm(vm_name)
-    if not state_path.exists():
-        console.print(
-            f"[red]No per-VM state for {vm_name!r} at {state_path}[/red]\n"
-            "[dim]Cannot destroy via Terraform without that state.[/dim]"
-        )
-        return False
-
-    env = os.environ.copy()
-    if vsphere_user:
-        env["TF_VAR_vsphere_user"] = vsphere_user
-        env["VSPHERE_USER"] = vsphere_user
-    if vsphere_password:
-        env["TF_VAR_vsphere_password"] = vsphere_password
-        env["VSPHERE_PASSWORD"] = vsphere_password
-    if vsphere_server or config.vsphere_server:
-        srv = vsphere_server or config.vsphere_server
-        env["TF_VAR_vsphere_server"] = srv
-        env["VSPHERE_SERVER"] = srv
-
-    cmd = [
-        "terraform",
-        "destroy",
-        "-auto-approve",
-        "-input=false",
-        f"-state={state_path}",
-        f"-state-out={state_path}",
-        f"-var=vm_name={vm_name}",
-    ]
-    # Minimal required vars — destroy still needs provider + some vars present
-    cmd += [f"-var=iso_path=unused"]
-    cmd += [f"-var=vsphere_datacenter={config.datacenter}"]
-    cmd += [f"-var=vsphere_cluster={config.cluster}"]
-    cmd += [f"-var=vm_datastore={config.vm_datastore}"]
-
-    console.print(f"[cyan]Destroying {vm_name} using state {state_path}[/cyan]")
-    try:
-        subprocess.run(cmd, cwd=tf_dir, env=env, check=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]terraform destroy failed (exit {e.returncode})[/red]")
         return False

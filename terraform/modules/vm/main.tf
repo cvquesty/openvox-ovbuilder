@@ -1,16 +1,14 @@
 # =============================================================================
-# ITSYS VMware ISO-based VM Provisioner Module
-#
-# Creates a virtual machine configured to boot from a datastore-resident
-# OS ISO image. Ideal for rapid stand-up of new VMs that will run an
-# interactive or kickstart-based OS installation.
-#
-# After the OS is installed (and usually after a reboot + VMware Tools),
-# you can re-apply Terraform (or use other tools) for further customization.
+# ovbuilder VM module — dual mode:
+#   provision_mode = "clone"  → clone Packer golden template + cloud-init identity
+#   provision_mode = "iso"    → legacy empty disk + ISO attach
 # =============================================================================
 
 locals {
-  iso_ds = var.iso_datastore != null ? var.iso_datastore : var.vm_datastore
+  iso_ds       = var.iso_datastore != null && var.iso_datastore != "" ? var.iso_datastore : var.vm_datastore
+  is_clone     = var.provision_mode == "clone"
+  is_iso       = var.provision_mode == "iso"
+  guestinfo    = var.guestinfo_extra_config
 }
 
 data "vsphere_datacenter" "dc" {
@@ -28,11 +26,11 @@ data "vsphere_datastore" "vm_ds" {
 }
 
 data "vsphere_datastore" "iso_ds" {
+  count         = local.is_iso ? 1 : 0
   name          = local.iso_ds
   datacenter_id = data.vsphere_datacenter.dc.id
 }
 
-# Resolve all requested networks
 data "vsphere_network" "networks" {
   for_each = toset(var.networks)
 
@@ -40,22 +38,28 @@ data "vsphere_network" "networks" {
   datacenter_id = data.vsphere_datacenter.dc.id
 }
 
-resource "vsphere_virtual_machine" "vm" {
+data "vsphere_virtual_machine" "template" {
+  count         = local.is_clone ? 1 : 0
+  name          = var.template_name
+  datacenter_id = data.vsphere_datacenter.dc.id
+}
+
+# ─── Golden clone path ───────────────────────────────────────────────────────
+resource "vsphere_virtual_machine" "from_template" {
+  count = local.is_clone ? 1 : 0
+
   name             = var.vm_name
   resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
   datastore_id     = data.vsphere_datastore.vm_ds.id
-
-  folder = var.folder != "" ? var.folder : null
+  folder           = var.folder != "" ? var.folder : null
 
   num_cpus                = var.num_cpus
   memory                  = var.memory_mb
-  guest_id                = var.guest_id
+  guest_id                = var.guest_id != "" ? var.guest_id : data.vsphere_virtual_machine.template[0].guest_id
   firmware                = var.firmware
   efi_secure_boot_enabled = var.efi_secure_boot_enabled
+  scsi_type               = data.vsphere_virtual_machine.template[0].scsi_type
 
-  scsi_type = "pvscsi" # Modern default; change via extra_config or future var if needed
-
-  # Primary + additional network interfaces (in order)
   dynamic "network_interface" {
     for_each = var.networks
     content {
@@ -64,7 +68,53 @@ resource "vsphere_virtual_machine" "vm" {
     }
   }
 
-  # OS / boot disk
+  disk {
+    label            = "disk0"
+    size             = max(var.disk_size_gb, data.vsphere_virtual_machine.template[0].disks.0.size)
+    thin_provisioned = true
+    unit_number      = 0
+  }
+
+  clone {
+    template_uuid = data.vsphere_virtual_machine.template[0].id
+  }
+
+  # Tools + OS exist — allow short guest wait (0 = don't fail the apply)
+  wait_for_guest_net_timeout = var.wait_for_guest_net_timeout
+  wait_for_guest_ip_timeout  = var.wait_for_guest_ip_timeout
+
+  extra_config = merge(
+    var.enable_disk_uuid ? { "disk.EnableUUID" = "TRUE" } : {},
+    local.guestinfo,
+  )
+
+  tags = var.tags
+}
+
+# ─── Legacy ISO path ─────────────────────────────────────────────────────────
+resource "vsphere_virtual_machine" "from_iso" {
+  count = local.is_iso ? 1 : 0
+
+  name             = var.vm_name
+  resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
+  datastore_id     = data.vsphere_datastore.vm_ds.id
+  folder           = var.folder != "" ? var.folder : null
+
+  num_cpus                = var.num_cpus
+  memory                  = var.memory_mb
+  guest_id                = var.guest_id != "" ? var.guest_id : "otherLinux64Guest"
+  firmware                = var.firmware
+  efi_secure_boot_enabled = var.efi_secure_boot_enabled
+  scsi_type               = "pvscsi"
+
+  dynamic "network_interface" {
+    for_each = var.networks
+    content {
+      network_id   = data.vsphere_network.networks[network_interface.value].id
+      adapter_type = "vmxnet3"
+    }
+  }
+
   disk {
     label            = "disk0"
     size             = var.disk_size_gb
@@ -72,37 +122,19 @@ resource "vsphere_virtual_machine" "vm" {
     unit_number      = 0
   }
 
-  # Attach the OS ISO from datastore so it is mounted as a virtual CD-ROM
   cdrom {
-    datastore_id = data.vsphere_datastore.iso_ds.id
+    datastore_id = data.vsphere_datastore.iso_ds[0].id
     path         = var.iso_path
   }
 
-  # Give the firmware/VM time to see the CD-ROM at power on
-  boot_delay = var.boot_delay_ms
-
-  # Important for fresh ISO installs:
-  # The guest is not running a full OS with tools yet, so disable waiters
-  # or they will time out.
+  boot_delay                 = var.boot_delay_ms
   wait_for_guest_net_timeout = 0
   wait_for_guest_ip_timeout  = 0
 
-  # Optional: expose disk UUIDs to guest.
-  # We also set bios.bootDeviceClasses so the firmware is more likely to try
-  # the attached CD-ROM (containing the selected ISO) early in the sequence.
   extra_config = merge(
     var.enable_disk_uuid ? { "disk.EnableUUID" = "TRUE" } : {},
-    {
-      # Prefer CD-ROM for initial boot (helps both BIOS and many EFI cases).
-      # The cdrom block + boot_delay do the heavy lifting of mounting the ISO.
-      "bios.bootDeviceClasses" = "allow:cd,hd,net"
-    }
+    { "bios.bootDeviceClasses" = "allow:cd,hd,net" },
   )
 
   tags = var.tags
-
-  lifecycle {
-    # Uncomment for production machines you never want Terraform to destroy
-    # prevent_destroy = true
-  }
 }
