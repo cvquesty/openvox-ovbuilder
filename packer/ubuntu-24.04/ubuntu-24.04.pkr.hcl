@@ -1,7 +1,11 @@
-# Packer: Ubuntu 24.04 → vSphere template (NO DHCP / NO SSH to guest)
+# Packer: Ubuntu 24.04 → vSphere template (NO DHCP / NO SSH)
 #
-# Autoinstall + late-commands bake tools/cloud-init; shutdown: poweroff.
-# Packer communicator=none waits for poweroff, then convert_to_template.
+# Media layout:
+#   sr0 = Ubuntu live-server ISO (iso_paths)
+#   sr1 = NoCloud seed labeled "cidata" (user-data + meta-data via cd_content)
+#
+# communicator=none: wait for autoinstall "shutdown: poweroff", then
+# convert_to_template. Clone identity comes from ovbuilder guestinfo later.
 
 packer {
   required_plugins {
@@ -89,22 +93,30 @@ source "vsphere-iso" "ubuntu2404" {
 
   iso_paths = local.iso_paths
 
+  # NoCloud seed (must be labeled cidata for cloud-init)
   cd_content = {
     "user-data" = file("${path.cwd}/ubuntu-24.04/http/user-data")
     "meta-data" = file("${path.cwd}/ubuntu-24.04/http/meta-data")
   }
   cd_label = "cidata"
 
-  boot_wait = "5s"
+  boot_wait = "15s"
+
+  # Explicit GRUB command-line boot (UEFI live server).
+  # Point nocloud at sr1 (seed); live media is sr0.
+  # Trailing "---" separates kernel params from installer args.
   boot_command = [
-    "e<wait>",
-    "<down><down><down><end>",
-    " autoinstall ds=nocloud\\;s=/cdrom/",
-    "<f10>",
+    "c<wait3>",
+    "linux /casper/vmlinuz",
+    " autoinstall",
+    " ds=nocloud\\;s=/dev/sr1/",
+    " ---",
+    "<enter><wait>",
+    "initrd /casper/initrd<enter><wait>",
+    "boot<enter>",
   ]
 
   communicator     = "none"
-  # Autoinstall + late-commands need far more than the 5m default.
   shutdown_timeout = "120m"
 
   convert_to_template = true
