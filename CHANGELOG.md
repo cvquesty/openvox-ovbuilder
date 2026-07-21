@@ -5,6 +5,14 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta6] - 2026-07-21
+
+### Fixed
+- **Static IP still missing after default-route fix** — `set-name: eth0`
+  produced an unbound `cloud-init eth0` NM profile while `ens33` kept the
+  stock DHCP "Wired connection 1". Drop set-name/gateway4; match `e*` only
+  with `to: 0.0.0.0/0` routes.
+
 ## [0.97-beta5] - 2026-07-21
 
 ### Fixed

@@ -17,9 +17,10 @@ def test_network_config_uses_zero_default_not_default_keyword():
         "10.0.1.5", 24, gateway="10.0.1.1", dns="10.0.1.2", domain="lab.local"
     )
     assert "10.0.1.5/24" in n
-    assert "gateway4: 10.0.1.1" in n
     assert "to: 0.0.0.0/0" in n
     assert "via: 10.0.1.1" in n
+    assert "gateway4:" not in n
+    assert "set-name:" not in n
     # Alma cloud-init rejects netplan's "default" as an address
     assert "to: default" not in n
     assert 'name: "e*"' in n

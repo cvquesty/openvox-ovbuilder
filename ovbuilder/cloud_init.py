@@ -58,23 +58,23 @@ def build_network_config(
     gw = (gateway or "").strip()
     dns1 = (dns or "").strip()
 
+    # No set-name: renaming to eth0 left Alma with an unbound
+    # "cloud-init eth0" profile while the real NIC stayed ens33 on DHCP.
     lines = [
         "version: 2",
         "ethernets:",
         "  nics:",
         "    match:",
         '      name: "e*"',
-        "    set-name: eth0",
         "    dhcp4: false",
         "    optional: true",
         "    addresses:",
         f"      - {ip}/{prefix}",
     ]
     if gw:
-        # gateway4: widely supported on RHEL NetworkManager renderer.
-        # routes with to: 0.0.0.0/0 — NOT "default" (breaks Alma cloud-init).
+        # to: 0.0.0.0/0 — NOT "default" (Alma rejects default as an address).
+        # Prefer routes only (gateway4 is deprecated in cloud-init 22.4+).
         lines += [
-            f"    gateway4: {gw}",
             "    routes:",
             "      - to: 0.0.0.0/0",
             f"        via: {gw}",
