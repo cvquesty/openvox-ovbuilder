@@ -4,7 +4,7 @@
 
 **The OpenVox-native CLI for building VMware VMs from ISO images — fast, repeatable, and a little bit magical.**
 
-[![Version](https://img.shields.io/badge/version-0.2.0--dev.21-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.2.0--dev.22-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Typer](https://img.shields.io/badge/Typer-0.12+-blue?style=for-the-badge&logo=python&logoColor=white)](https://typer.tiangolo.com)
@@ -43,7 +43,7 @@ It follows the same modern, noun-verb, operator-first philosophy as the `ovox` C
 
 | Component              | Version       | Notes |
 |------------------------|---------------|-------|
-| **ovbuilder CLI**      | `0.2.0-dev.21` | Typer + Rich + pyVmomi. Live vCenter discovery. |
+| **ovbuilder CLI**      | `0.2.0-dev.22` | Typer + Rich + pyVmomi. Live vCenter discovery. |
 | **Terraform Module**   | 1.x (bundled) | VMware vSphere ISO boot + thin disks + EFI. Lives in `terraform/modules/vm/`. |
 | **Python Runtime**     | 3.9+          | Typer ≥0.12, Rich ≥13, Paramiko ≥3, pyVmomi ≥8. |
 | **Post-Install**       | —             | Hostname + static IP (nmcli/netplan best-effort) + official OpenVox `install.bash`. |

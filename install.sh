@@ -204,6 +204,41 @@ log_info "Staging Terraform provisioning modules..."
 TF_SRC="$SCRIPT_DIR/terraform"
 TF_DEST="$INSTALL_DIR/terraform"
 
+# Preserve local Terraform state + provider cache across reinstalls.
+# Wiping these caused "rebuild renames previous VM" confusion when a single
+# shared state was recreated empty, and also loses tracking of existing VMs.
+TF_PRESERVE_TMP=""
+if [ -d "$TF_DEST" ]; then
+    TF_PRESERVE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/ovbuilder-tf-preserve.XXXXXX")"
+    # State files (legacy shared state in module dir)
+    for f in "$TF_DEST"/terraform.tfstate "$TF_DEST"/terraform.tfstate.backup \
+             "$TF_DEST"/terraform.tfstate.* ; do
+        if [ -e "$f" ]; then
+            if [[ "$USE_SUDO" == true ]]; then
+                sudo cp -a "$f" "$TF_PRESERVE_TMP/" 2>/dev/null || true
+            else
+                cp -a "$f" "$TF_PRESERVE_TMP/" 2>/dev/null || true
+            fi
+        fi
+    done
+    # Provider plugins / modules cache
+    if [ -d "$TF_DEST/.terraform" ]; then
+        if [[ "$USE_SUDO" == true ]]; then
+            sudo cp -a "$TF_DEST/.terraform" "$TF_PRESERVE_TMP/" 2>/dev/null || true
+        else
+            cp -a "$TF_DEST/.terraform" "$TF_PRESERVE_TMP/" 2>/dev/null || true
+        fi
+    fi
+    if [ -f "$TF_DEST/.terraform.lock.hcl" ]; then
+        if [[ "$USE_SUDO" == true ]]; then
+            sudo cp -a "$TF_DEST/.terraform.lock.hcl" "$TF_PRESERVE_TMP/" 2>/dev/null || true
+        else
+            cp -a "$TF_DEST/.terraform.lock.hcl" "$TF_PRESERVE_TMP/" 2>/dev/null || true
+        fi
+    fi
+    log_info "Preserved existing Terraform state/cache (if any) before restage"
+fi
+
 if [[ "$USE_SUDO" == true ]]; then
     sudo rm -rf "$TF_DEST"
     sudo mkdir -p "$TF_DEST"
@@ -212,6 +247,18 @@ else
     rm -rf "$TF_DEST"
     mkdir -p "$TF_DEST"
     cp -a "$TF_SRC/." "$TF_DEST/"
+fi
+
+# Restore preserved state/cache on top of freshly staged modules
+if [ -n "$TF_PRESERVE_TMP" ] && [ -d "$TF_PRESERVE_TMP" ]; then
+    if [[ "$USE_SUDO" == true ]]; then
+        sudo cp -a "$TF_PRESERVE_TMP"/. "$TF_DEST/" 2>/dev/null || true
+        sudo rm -rf "$TF_PRESERVE_TMP"
+    else
+        cp -a "$TF_PRESERVE_TMP"/. "$TF_DEST/" 2>/dev/null || true
+        rm -rf "$TF_PRESERVE_TMP"
+    fi
+    log_ok "Restored preserved Terraform state/cache into $TF_DEST"
 fi
 
 if command -v terraform >/dev/null 2>&1; then

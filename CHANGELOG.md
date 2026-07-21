@@ -5,6 +5,14 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-dev.22] - 2026-07-21
+
+### Fixed
+- **`install.sh` no longer deletes Terraform state** when restaging modules.
+  Reinstall used `rm -rf /opt/ovbuilder/terraform`, which wiped the shared
+  `terraform.tfstate` (and would lose tracking of existing VMs). State files,
+  `.terraform/`, and the lockfile are now preserved across upgrades.
+
 ## [0.2.0-dev.21] - 2026-07-21
 
 ### Fixed
