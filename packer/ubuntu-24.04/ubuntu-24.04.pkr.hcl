@@ -95,23 +95,26 @@ source "vsphere-iso" "ubuntu2404" {
 
   iso_paths = local.iso_paths
 
+  # NoCloud seed on second CD. Filenames must be exact; vendor-data optional
+  # but avoids some cloud-init probes. Volume label cidata/CIDATA is how
+  # cloud-init finds the seed when ds=nocloud has no seedfrom path.
   cd_content = {
-    "user-data" = file("${path.cwd}/ubuntu-24.04/http/user-data")
-    "meta-data" = file("${path.cwd}/ubuntu-24.04/http/meta-data")
+    "user-data"   = file("${path.cwd}/ubuntu-24.04/http/user-data")
+    "meta-data"   = file("${path.cwd}/ubuntu-24.04/http/meta-data")
+    "vendor-data" = file("${path.cwd}/ubuntu-24.04/http/vendor-data")
   }
-  # cloud-init looks for this volume label (case-insensitive cidata/CIDATA)
   cd_label = "cidata"
 
-  # Must catch the GRUB menu before it auto-boots. 20s was too long — the
-  # live image already entered interactive install (language screen).
+  # Catch GRUB before auto-boot (live-server timeout is short).
   boot_wait = "5s"
 
-  # GRUB command mode (c): more reliable on EFI than editing the menu entry.
-  # Seed is the second CD (label cidata), not /cdrom (live ISO = packages).
-  # cloud-config-url=/dev/null skips any network cloud-config wait.
+  # GRUB command mode. Quote ds=... so GRUB does not treat ";" as a
+  # command separator (that was dropping seedfrom and hanging cloud-init).
+  # Prefer by-label over /dev/sr1 — CD order is not guaranteed.
+  # cloud-config-url=/dev/null skips network cloud-config waits.
   boot_command = [
     "c<wait3>",
-    "linux /casper/vmlinuz --- autoinstall ds=nocloud\\;s=/dev/disk/by-label/cidata/ cloud-config-url=/dev/null<enter><wait3>",
+    "linux /casper/vmlinuz autoinstall quiet \"ds=nocloud;s=/dev/disk/by-label/cidata/\" cloud-config-url=/dev/null ---<enter><wait3>",
     "initrd /casper/initrd<enter><wait3>",
     "boot<enter>",
   ]
