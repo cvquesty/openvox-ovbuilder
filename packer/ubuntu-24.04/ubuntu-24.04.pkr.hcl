@@ -1,11 +1,13 @@
 # Packer: Ubuntu 24.04 → vSphere template (NO DHCP / NO SSH)
 #
-# Media layout:
-#   sr0 = Ubuntu live-server ISO (iso_paths)
-#   sr1 = NoCloud seed labeled "cidata" (user-data + meta-data via cd_content)
+# Media:
+#   sr0 = Ubuntu live-server ISO
+#   sr1 = NoCloud seed labeled "cidata" (user-data + meta-data)
 #
-# communicator=none: wait for autoinstall "shutdown: poweroff", then
-# convert_to_template. Clone identity comes from ovbuilder guestinfo later.
+# Language-selection hang means autoinstall never started — usually the
+# nocloud seed path was wrong (/cdrom points at the live ISO, not the seed).
+# Use the volume label path cloud-init understands:
+#   ds=nocloud;s=/dev/disk/by-label/cidata/
 
 packer {
   required_plugins {
@@ -93,27 +95,26 @@ source "vsphere-iso" "ubuntu2404" {
 
   iso_paths = local.iso_paths
 
-  # NoCloud seed (must be labeled cidata for cloud-init)
   cd_content = {
     "user-data" = file("${path.cwd}/ubuntu-24.04/http/user-data")
     "meta-data" = file("${path.cwd}/ubuntu-24.04/http/meta-data")
   }
+  # cloud-init looks for this volume label (case-insensitive cidata/CIDATA)
   cd_label = "cidata"
 
-  boot_wait = "15s"
+  boot_wait = "20s"
 
-  # Explicit GRUB command-line boot (UEFI live server).
-  # Point nocloud at sr1 (seed); live media is sr0.
-  # Trailing "---" separates kernel params from installer args.
+  # Edit the live-server GRUB entry (more reliable than bare "c" command mode
+  # on some Ubuntu live images). Append autoinstall + nocloud seed by LABEL.
+  # cloud-config-url=/dev/null avoids waiting on network for cloud-config.
   boot_command = [
-    "c<wait3>",
-    "linux /casper/vmlinuz",
+    "e<wait>",
+    "<down><down><down><end><wait>",
     " autoinstall",
-    " ds=nocloud\\;s=/dev/sr1/",
+    " ds=nocloud\\;s=/dev/disk/by-label/cidata/",
+    " cloud-config-url=/dev/null",
     " ---",
-    "<enter><wait>",
-    "initrd /casper/initrd<enter><wait>",
-    "boot<enter>",
+    "<f10>",
   ]
 
   communicator     = "none"
