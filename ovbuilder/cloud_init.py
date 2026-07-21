@@ -12,24 +12,24 @@ per-instance identity without a console install:
 
 VMware Tools + cloud-init read ``guestinfo.metadata`` and
 ``guestinfo.userdata`` from the VM's extraConfig (set by Terraform).
-This module builds those YAML documents and base64-encodes them the way
-the VMware datasource expects (encoding keys = "base64").
 
 CRITICAL — where network config must live
 -----------------------------------------
 The VMware datasource applies **network** from **metadata** (key
-``network``, optional ``network.encoding``), not from a top-level
-``network:`` block in user-data.
+``network``, optional ``network.encoding``), not from user-data.
 
-Putting netplan-style config only in user-data is a common mistake:
-cloud-init still runs (hostname, runcmd, NM profile rename like
-"cloud-init ens33") but the interface never gets the static IP.
+CRITICAL — route syntax on RHEL/Alma cloud-init
+----------------------------------------------
+Do **not** use netplan's ``to: default``. AlmaLinux/RHEL cloud-init's
+network converter treats the string "default" as an IP and fails init-local:
+
+  Address default is not a valid ip address
+  Address default is not a valid ip network
+  failed stage init-local
+
+Use ``to: 0.0.0.0/0`` and also set ``gateway4`` for older renderers.
 
 See: https://docs.cloud-init.io/en/latest/reference/datasources/vmware.html
-     "Configuring the network"
-
-Network matching uses ``name: "e*"`` so both ``eth0`` and ``ens192`` /
-``ens33`` style names work across AlmaLinux and Ubuntu goldens.
 """
 
 from __future__ import annotations
@@ -39,12 +39,7 @@ from typing import Optional
 
 
 def _b64(s: str) -> str:
-    """
-    UTF-8 → base64 ASCII for guestinfo.* values.
-
-    vSphere extraConfig values are strings; base64 avoids quoting issues
-    with newlines and special characters in YAML.
-    """
+    """UTF-8 → base64 ASCII for guestinfo.* values."""
     return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
 
@@ -58,8 +53,7 @@ def build_network_config(
     """
     Build cloud-init **Network Config Version 2** YAML (no top-level wrapper).
 
-    This document is embedded under metadata ``network:`` for the VMware
-    datasource (and may also be set as guestinfo.networkconfig).
+    Embedded under metadata ``network:`` for the VMware datasource.
     """
     gw = (gateway or "").strip()
     dns1 = (dns or "").strip()
@@ -70,14 +64,19 @@ def build_network_config(
         "  nics:",
         "    match:",
         '      name: "e*"',
+        "    set-name: eth0",
         "    dhcp4: false",
+        "    optional: true",
         "    addresses:",
         f"      - {ip}/{prefix}",
     ]
     if gw:
+        # gateway4: widely supported on RHEL NetworkManager renderer.
+        # routes with to: 0.0.0.0/0 — NOT "default" (breaks Alma cloud-init).
         lines += [
+            f"    gateway4: {gw}",
             "    routes:",
-            "      - to: default",
+            "      - to: 0.0.0.0/0",
             f"        via: {gw}",
         ]
     if dns1:
@@ -103,11 +102,10 @@ def build_metadata(
     """
     Build cloud-init **metadata** YAML (instance-id, hostname, **network**).
 
-    When ``ip`` and ``prefix`` are set, embeds Network Config v2 under the
-    ``network`` key (base64 + ``network.encoding``) — required for VMware
-    guestinfo static networking.
+    Network Config v2 is embedded as base64 under ``network`` with
+    ``network.encoding: base64`` (VMware guestinfo contract).
     """
-    _ = domain  # reserved for future az / region style fields
+    _ = domain
     lines = [
         f"instance-id: {hostname}",
         f"local-hostname: {hostname}",
@@ -117,7 +115,6 @@ def build_metadata(
         net_yaml = build_network_config(
             ip, prefix, gateway=gateway, dns=dns, domain=domain
         )
-        # VMware datasource: metadata.network may be encoded (base64).
         lines += [
             f"network: {_b64(net_yaml)}",
             "network.encoding: base64",
@@ -137,11 +134,9 @@ def build_userdata(
     """
     Build cloud-init **user-data** YAML (hostname / hygiene only).
 
-    Network is intentionally **not** here — see module docstring and
-    ``build_metadata``. ``ip``/``prefix``/``gateway``/``dns`` are accepted
-    for call-site symmetry with older APIs but are unused in this document.
+    Network is intentionally **not** here — see module docstring.
     """
-    _ = (ip, prefix, gateway, dns)  # network lives in metadata
+    _ = (ip, prefix, gateway, dns)
     fqdn = f"{hostname}.{domain}" if domain else hostname
 
     lines = [
@@ -152,8 +147,11 @@ def build_userdata(
         "manage_etc_hosts: true",
         "package_update: false",
         "package_upgrade: false",
+        # Avoid multi-minute boots when carrier/DHCP is wrong; static IP
+        # comes from metadata network, not wait-online.
+        "bootcmd:",
+        "  - [systemctl, disable, --now, NetworkManager-wait-online.service]",
         "runcmd:",
-        # Belt-and-suspenders: some images set hostname late; force it.
         f"  - [hostnamectl, set-hostname, {hostname}]",
         f'final_message: "ovbuilder cloud-init finished for {hostname}"',
         "",
@@ -172,14 +170,13 @@ def guestinfo_extra_config(
     """
     Return a dict for Terraform ``extra_config`` / ``guestinfo_extra_config``.
 
-    Keys (VMware cloud-init datasource contract)
-    --------------------------------------------
-    guestinfo.metadata            — base64 metadata YAML (includes network)
-    guestinfo.metadata.encoding   — "base64"
-    guestinfo.userdata            — base64 user-data YAML (hostname, etc.)
-    guestinfo.userdata.encoding   — "base64"
-    guestinfo.networkconfig       — base64 Network Config v2 (belt-and-suspenders)
-    guestinfo.networkconfig.encoding — "base64"
+    Keys
+    ----
+    guestinfo.metadata / .encoding   — identity + network (VMware path)
+    guestinfo.userdata / .encoding   — hostname hygiene only
+
+    Deliberately **no** guestinfo.networkconfig: shipping network in both
+    metadata and networkconfig can double-apply or confuse older cloud-init.
     """
     meta = build_metadata(
         hostname,
@@ -192,15 +189,9 @@ def guestinfo_extra_config(
     user = build_userdata(
         hostname, ip, prefix, gateway=gateway, dns=dns, domain=domain
     )
-    net = build_network_config(
-        ip, prefix, gateway=gateway, dns=dns, domain=domain
-    )
     return {
         "guestinfo.metadata": _b64(meta),
         "guestinfo.metadata.encoding": "base64",
         "guestinfo.userdata": _b64(user),
         "guestinfo.userdata.encoding": "base64",
-        # Some cloud-init builds also honor a dedicated networkconfig key.
-        "guestinfo.networkconfig": _b64(net),
-        "guestinfo.networkconfig.encoding": "base64",
     }

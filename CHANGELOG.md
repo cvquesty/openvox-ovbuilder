@@ -5,6 +5,16 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta5] - 2026-07-21
+
+### Fixed
+- **Alma golden clone: cloud-init init-local failure / NM hang** — route
+  used netplan `to: default`, which RHEL/Alma cloud-init rejects as
+  "Address default is not a valid ip address", fails init-local, leaves
+  ens33 on DHCP with no lease. Use `to: 0.0.0.0/0` + `gateway4`, mark NIC
+  `optional: true`, drop duplicate `guestinfo.networkconfig`, and disable
+  NetworkManager-wait-online via bootcmd.
+
 ## [0.97-beta4] - 2026-07-21
 
 ### Fixed
