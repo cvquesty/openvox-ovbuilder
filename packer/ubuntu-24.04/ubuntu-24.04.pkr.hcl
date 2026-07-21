@@ -102,19 +102,18 @@ source "vsphere-iso" "ubuntu2404" {
   # cloud-init looks for this volume label (case-insensitive cidata/CIDATA)
   cd_label = "cidata"
 
-  boot_wait = "20s"
+  # Must catch the GRUB menu before it auto-boots. 20s was too long — the
+  # live image already entered interactive install (language screen).
+  boot_wait = "5s"
 
-  # Edit the live-server GRUB entry (more reliable than bare "c" command mode
-  # on some Ubuntu live images). Append autoinstall + nocloud seed by LABEL.
-  # cloud-config-url=/dev/null avoids waiting on network for cloud-config.
+  # GRUB command mode (c): more reliable on EFI than editing the menu entry.
+  # Seed is the second CD (label cidata), not /cdrom (live ISO = packages).
+  # cloud-config-url=/dev/null skips any network cloud-config wait.
   boot_command = [
-    "e<wait>",
-    "<down><down><down><end><wait>",
-    " autoinstall",
-    " ds=nocloud\\;s=/dev/disk/by-label/cidata/",
-    " cloud-config-url=/dev/null",
-    " ---",
-    "<f10>",
+    "c<wait3>",
+    "linux /casper/vmlinuz --- autoinstall ds=nocloud\\;s=/dev/disk/by-label/cidata/ cloud-config-url=/dev/null<enter><wait3>",
+    "initrd /casper/initrd<enter><wait3>",
+    "boot<enter>",
   ]
 
   communicator     = "none"
