@@ -1,15 +1,13 @@
 # Packer: AlmaLinux 10 → vSphere template (NO DHCP / NO SSH)
 #
-# Why previous boots hit dracut emergency (kickstart.sh /tmp/ks.cfg.done):
-#   Editing GRUB and setting inst.stage2=cdrom / wrong LABEL made dracut wait
-#   for stage2 or ks on the wrong device. With TWO CDs, bare "cdrom" is ambiguous.
-#
-# Reliable approach for Alma/RHEL:
-#   1. Leave the DVD's own GRUB entry alone (it already has correct inst.stage2
-#      for the install media — with proper inst. prefixes on Alma 10).
-#   2. Attach kickstart as second CD labeled OEMDRV with file ks.cfg at root.
-#      Anaconda auto-loads ks.cfg from a volume labeled OEMDRV (no inst.ks= needed).
-#   3. Only append inst.text if we must edit; prefer default boot (Enter).
+# Boot strategy (learned the hard way on Alma 10 + dual CD):
+#   * Editing the DVD GRUB "linux" line often drops/invalidates stage2 so
+#     Anaconda reports missing inst.stage2/inst.repo.
+#   * Bare inst.stage2=cdrom is ambiguous with two CDs.
+#   * Fix: enter GRUB *command* mode and boot with a full, explicit cmdline:
+#       stage2 + repo  = first CD  (/dev/sr0 = AlmaLinux DVD from iso_paths)
+#       kickstart      = second CD (/dev/sr1 = OEMDRV seed from cd_content)
+#   * Every installer option uses the mandatory "inst." prefix (RHEL/Alma 10).
 
 packer {
   required_plugins {
@@ -95,30 +93,29 @@ source "vsphere-iso" "almalinux10" {
     disk_thin_provisioned = true
   }
 
-  # CD1: AlmaLinux DVD (stage2 + packages) — GRUB on this disc is authoritative
+  # CD order: Packer attaches iso_paths first, then generated cd_content ISO.
+  # That yields sr0 = Alma DVD, sr1 = kickstart seed (OEMDRV).
   iso_paths = local.iso_paths
 
-  # CD2: kickstart only. Label MUST be OEMDRV for Anaconda auto-load of /ks.cfg
   cd_content = {
     "ks.cfg" = file("${path.cwd}/almalinux-10/http/ks.cfg")
   }
   cd_label = "OEMDRV"
 
-  # Wait for UEFI GRUB from the DVD
-  boot_wait = "20s"
+  boot_wait = "25s"
 
-  # DVD GRUB already has correct inst.stage2/inst.repo for Alma 10.
-  # OEMDRV auto-load is unreliable in this dual-CD VMware layout, so we
-  # *append only* kickstart (do not replace stage2/repo — that caused dracut hangs).
-  #
-  # GRUB edit: open entry → move to kernel line end → append → boot (Ctrl-x).
+  # GRUB2 command-line boot (UEFI). Full explicit inst.* parameters.
+  # Paths /images/pxeboot/* are the standard Alma/RHEL DVD layout.
   boot_command = [
-    "e<wait>",
-    "<down><down><end><wait>",
-    " inst.ks=hd:LABEL=OEMDRV:/ks.cfg",
+    "c<wait3>",
+    "linuxefi /images/pxeboot/vmlinuz",
+    " inst.stage2=hd:/dev/sr0",
+    " inst.repo=hd:/dev/sr0",
+    " inst.ks=hd:/dev/sr1:/ks.cfg",
     " inst.text",
-    " inst.cmdline",
-    "<leftCtrlOn>x<leftCtrlOff>",
+    "<enter><wait>",
+    "initrdefi /images/pxeboot/initrd.img<enter><wait>",
+    "boot<enter>",
   ]
 
   communicator     = "none"
