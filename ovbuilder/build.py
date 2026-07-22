@@ -521,6 +521,7 @@ def build(
             gateway=gateway,
             dns=dns,
             domain=cfg.domain,
+            default_user=default_user,
         )
 
     # Map CLI golden → Terraform clone; keep iso as iso.

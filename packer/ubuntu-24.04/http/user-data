@@ -53,6 +53,10 @@ autoinstall:
   late-commands:
     - echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/ubuntu
     - chmod 440 /target/etc/sudoers.d/ubuntu
+    # Force known passwords (identity hash + users: can race; chpasswd is authoritative)
+    - curtin in-target --target=/target -- bash -c "echo 'ubuntu:ChangeMe-BuildOnly!' | chpasswd; echo 'root:ChangeMe-BuildOnly!' | chpasswd"
+    - curtin in-target --target=/target -- passwd -u ubuntu || true
+    - curtin in-target --target=/target -- passwd -u root || true
     - curtin in-target --target=/target -- systemctl enable open-vm-tools.service || true
     - curtin in-target --target=/target -- systemctl enable ssh.service || true
     - curtin in-target --target=/target -- systemctl enable cloud-init.service cloud-init-local.service cloud-config.service cloud-final.service || true

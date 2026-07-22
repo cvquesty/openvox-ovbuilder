@@ -36,13 +36,21 @@ def test_nmcli_script_reuses_existing_connection():
 
 def test_userdata_disables_cloud_init_network_and_runs_nmcli():
     u = build_userdata(
-        "web1", "10.0.1.5", 24, gateway="10.0.1.1", dns="10.0.1.2", domain="lab"
+        "web1",
+        "10.0.1.5",
+        24,
+        gateway="10.0.1.1",
+        dns="10.0.1.2",
+        domain="lab",
+        default_user="ubuntu",
     )
     assert "hostname: web1" in u
     assert "config: disabled" in u
     assert "/usr/local/sbin/ovbuilder-net.sh" in u
     assert "10.0.1.5/24" in u
     assert "NetworkManager-wait-online" in u
+    assert "ubuntu:ChangeMe-BuildOnly!" in u
+    assert "root:ChangeMe-BuildOnly!" in u
     # No Network Config v2 "ethernets/nics/match" path
     assert "ethernets:" not in u
     assert 'name: "e*"' not in u
@@ -50,7 +58,12 @@ def test_userdata_disables_cloud_init_network_and_runs_nmcli():
 
 def test_guestinfo_payloads():
     g = guestinfo_extra_config(
-        "n1", "192.168.1.10", 19, gateway="192.168.1.1", dns="1.1.1.1"
+        "n1",
+        "192.168.1.10",
+        19,
+        gateway="192.168.1.1",
+        dns="1.1.1.1",
+        default_user="ubuntu",
     )
     assert g["guestinfo.metadata.encoding"] == "base64"
     assert g["guestinfo.userdata.encoding"] == "base64"
@@ -64,3 +77,4 @@ def test_guestinfo_payloads():
     assert "config: disabled" in user
     assert "192.168.1.10/19" in user
     assert "ovbuilder-net.sh" in user
+    assert "ubuntu:ChangeMe-BuildOnly!" in user

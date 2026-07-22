@@ -41,6 +41,10 @@ import base64
 import shlex
 from typing import Optional
 
+# Baked into Packer goldens (Alma kickstart + Ubuntu autoinstall).
+# Also re-applied at clone time so a broken golden password does not brick login.
+GOLDEN_DEFAULT_PASSWORD = "ChangeMe-BuildOnly!"
+
 
 def _b64(s: str) -> str:
     """UTF-8 → base64 ASCII for guestinfo.* values."""
@@ -164,9 +168,11 @@ def build_userdata(
     gateway: Optional[str] = None,
     dns: Optional[str] = None,
     domain: str = "",
+    default_user: str = "ubuntu",
+    password: str = GOLDEN_DEFAULT_PASSWORD,
 ) -> str:
     """
-    Build cloud-init **user-data**: hostname + disable CI network + nmcli runcmd.
+    Build cloud-init **user-data**: hostname, passwords, disable CI network, nmcli.
     """
     fqdn = f"{hostname}.{domain}" if domain else hostname
     script = _nmcli_configure_script(
@@ -177,6 +183,11 @@ def build_userdata(
     script_block = "\n".join(
         f"      {line}" if line else "      " for line in body_lines
     )
+    # default_user is almalinux or ubuntu depending on golden; also set root.
+    user = (default_user or "ubuntu").strip() or "ubuntu"
+    pw = password or GOLDEN_DEFAULT_PASSWORD
+    # chpasswd list: user:pass one per line (cloud-init classic form)
+    chpasswd_list = f"{user}:{pw}\\nroot:{pw}"
 
     lines = [
         "#cloud-config",
@@ -186,6 +197,14 @@ def build_userdata(
         "manage_etc_hosts: true",
         "package_update: false",
         "package_upgrade: false",
+        "ssh_pwauth: true",
+        "disable_root: false",
+        # Re-assert golden password on first clone boot (fixes broken goldens).
+        "chpasswd:",
+        "  expire: false",
+        "  list: |",
+        f"    {user}:{pw}",
+        f"    root:{pw}",
         "# Do NOT let cloud-init invent NM profiles (orphan nics/eth0 names).",
         "network:",
         "  config: disabled",
@@ -199,10 +218,13 @@ def build_userdata(
         script_block,
         "runcmd:",
         f"  - [hostnamectl, set-hostname, {hostname}]",
+        # Belt-and-suspenders if chpasswd module order races users
+        f"  - [bash, -c, \"echo '{user}:{pw}' | chpasswd; echo 'root:{pw}' | chpasswd\"]",
         "  - [/usr/local/sbin/ovbuilder-net.sh]",
         f'final_message: "ovbuilder cloud-init finished for {hostname}"',
         "",
     ]
+    _ = chpasswd_list  # reserved if we switch formats
     return "\n".join(lines)
 
 
@@ -213,6 +235,8 @@ def guestinfo_extra_config(
     gateway: Optional[str] = None,
     dns: Optional[str] = None,
     domain: str = "",
+    default_user: str = "ubuntu",
+    password: str = GOLDEN_DEFAULT_PASSWORD,
 ) -> dict:
     """
     Return a dict for Terraform ``extra_config`` / ``guestinfo_extra_config``.
@@ -220,11 +244,18 @@ def guestinfo_extra_config(
     Keys
     ----
     guestinfo.metadata / .encoding — instance-id + hostname only
-    guestinfo.userdata / .encoding — hostname, network disabled, nmcli apply
+    guestinfo.userdata / .encoding — hostname, passwords, network, nmcli
     """
     meta = build_metadata(hostname, domain=domain)
     user = build_userdata(
-        hostname, ip, prefix, gateway=gateway, dns=dns, domain=domain
+        hostname,
+        ip,
+        prefix,
+        gateway=gateway,
+        dns=dns,
+        domain=domain,
+        default_user=default_user,
+        password=password,
     )
     return {
         "guestinfo.metadata": _b64(meta),
