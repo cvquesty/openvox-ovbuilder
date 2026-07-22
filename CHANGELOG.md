@@ -5,6 +5,16 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta7] - 2026-07-22
+
+### Fixed
+- **Networking: stop inventing NM profiles** — cloud-init Network Config v2
+  created orphan `cloud-init nics` / unbound profiles while `ens33` stayed on
+  stock `Wired connection 1` (nmtui looked right, `ip addr` empty). Now:
+  `network: {config: disabled}` and a single **nmcli** script that finds the
+  existing primary ethernet connection, configures it **in place** (bind to
+  first `e*` iface), deletes spare ethernet profiles, and brings it up.
+
 ## [0.97-beta6] - 2026-07-21
 
 ### Fixed
