@@ -1,9 +1,7 @@
 # AlmaLinux 10 kickstart — minimal core golden (NO DHCP)
+# Templated by Packer (ssh_password from variables.auto.pkrvars.hcl — not in git).
 #
-# Package set: @core (smallest usable base) + Tools/cloud-init + a few CLI utils.
-# Not @^minimal-environment (larger) and not a full DVD group set.
-#
-# Packer communicator=none waits for `poweroff` after %post completes.
+# Package set: @core + Tools/cloud-init. Packer waits for poweroff after %post.
 # Clone identity (hostname / static IP) comes from ovbuilder guestinfo later.
 
 text
@@ -12,30 +10,22 @@ lang en_US.UTF-8
 keyboard us
 timezone UTC --utc
 
-# AlmaLinux 10 rejects --bootproto=none (only dhcp|bootp|static|query|ibft).
-# Offline golden: do not require a lease. Hostname only; clones get real
-# addressing from ovbuilder cloud-init guestinfo later.
+# AlmaLinux 10: network hostname only; clones get real addressing later.
 network --hostname=localhost.localdomain
 firewall --disabled
 selinux --permissive
-# open-vm-tools unit names vary; enable in %post as well
 services --enabled="sshd,chronyd"
 
 ignoredisk --only-use=sda
 clearpart --all --initlabel --drives=sda
 autopart --type=plain
 
-rootpw --plaintext ChangeMe-BuildOnly!
-user --name=almalinux --groups=wheel --password=ChangeMe-BuildOnly! --plaintext
+rootpw --plaintext ${ssh_password}
+user --name=almalinux --groups=wheel --password=${ssh_password} --plaintext
 
 bootloader --location=mbr --boot-drive=sda
-
-# After packages + %post, power off so Packer can convert-to-template
 poweroff
 
-# --- Minimal package set ----------------------------------------------------
-# @core          = smallest standard base (smaller than Minimal Install env)
-# Keep Tools + cloud-init so clones work with ovbuilder guestinfo
 %packages --ignoremissing --excludedocs
 @core
 open-vm-tools
@@ -44,14 +34,12 @@ cloud-utils-growpart
 sudo
 curl
 tar
-# Explicitly avoid heavy / GUI / docs piles if groups pull them in
 -gnome-*
 -plasma-*
 -libreoffice*
 -kernel-debug*
 %end
 
-# Do not use --erroronfail: optional hygiene must not abort poweroff
 %post --log=/root/ks-post.log
 set +e
 
@@ -71,7 +59,6 @@ datasource:
     allow_raw_data: true
 EOF
 
-# First-clone uniqueness
 if command -v cloud-init >/dev/null 2>&1; then
   cloud-init clean --logs --seed 2>/dev/null || cloud-init clean --logs 2>/dev/null || true
 fi

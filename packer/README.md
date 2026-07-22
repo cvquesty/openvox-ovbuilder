@@ -1,3 +1,7 @@
+## Secrets
+
+See [../docs/SECRETS.md](../docs/SECRETS.md). Packer vars: gitignored `variables.auto.pkrvars.hcl` only.
+
 # ovbuilder Golden Images (Packer)
 
 Build **versioned vSphere templates** once; day-to-day `ovbuilder build` only

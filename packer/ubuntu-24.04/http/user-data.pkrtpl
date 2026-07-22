@@ -1,8 +1,7 @@
 #cloud-config
-# Ubuntu 24.04 autoinstall — ovbuilder golden (NO DHCP required)
-#
-# Packer uses communicator=none and waits for poweroff. Identity for clones
-# comes later from ovbuilder cloud-init guestinfo (hostname + static IP).
+# Ubuntu 24.04 autoinstall — ovbuilder golden (NO DHCP)
+# Templated by Packer: ssh_password + ssh_password_crypted from local pkrvars
+# (never commit real values). Generate crypted: openssl passwd -6 'your-password'
 autoinstall:
   version: 1
   locale: en_US.UTF-8
@@ -11,15 +10,13 @@ autoinstall:
   identity:
     hostname: ovbuilder-ubuntu-build
     username: ubuntu
-    # ChangeMe-BuildOnly!  (openssl passwd -6)
-    password: "$6$RaFy6HOCllXP3RLw$7aJ8pbBtpNJuI.b/UZG.AYHihuCm.x4nmcN0m2oZq2SWmdG1GB3LQsKCzkR7T70vdH6zmcydtGBtUANq6KU4K."
+    password: "${ssh_password_crypted}"
   ssh:
     install-server: true
     allow-pw: true
   storage:
     layout:
       name: direct
-  # No DHCP — leave NICs down/unconfigured for the golden
   network:
     network:
       version: 2
@@ -29,7 +26,6 @@ autoinstall:
             name: "e*"
           dhcp4: false
           optional: true
-  # Minimal additive list (base is already server-minimal from live-server ISO)
   packages:
     - open-vm-tools
     - cloud-init
@@ -39,22 +35,16 @@ autoinstall:
     disable_root: false
     package_update: false
     package_upgrade: false
-
     users:
       - name: ubuntu
         groups: [sudo]
         shell: /bin/bash
         sudo: ALL=(ALL) NOPASSWD:ALL
         lock_passwd: false
-    chpasswd:
-      expire: false
-      list:
-        - ubuntu:ChangeMe-BuildOnly!
   late-commands:
     - echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/ubuntu
     - chmod 440 /target/etc/sudoers.d/ubuntu
-    # Force known passwords (identity hash + users: can race; chpasswd is authoritative)
-    - curtin in-target --target=/target -- bash -c "echo 'ubuntu:ChangeMe-BuildOnly!' | chpasswd; echo 'root:ChangeMe-BuildOnly!' | chpasswd"
+    - curtin in-target --target=/target -- bash -c "echo 'ubuntu:${ssh_password}' | chpasswd; echo 'root:${ssh_password}' | chpasswd"
     - curtin in-target --target=/target -- passwd -u ubuntu || true
     - curtin in-target --target=/target -- passwd -u root || true
     - curtin in-target --target=/target -- systemctl enable open-vm-tools.service || true
@@ -67,12 +57,10 @@ autoinstall:
         VMware:
           allow_raw_data: true
       EOF
-    # Hygiene so first clone gets unique identity
     - curtin in-target --target=/target -- cloud-init clean --logs || true
     - truncate -s 0 /target/etc/machine-id || true
     - rm -f /target/var/lib/dbus/machine-id || true
     - ln -sf /etc/machine-id /target/var/lib/dbus/machine-id || true
     - rm -f /target/etc/ssh/ssh_host_* || true
     - rm -f /target/etc/netplan/*.yaml || true
-  # Packer communicator=none waits for poweroff
   shutdown: poweroff

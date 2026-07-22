@@ -5,6 +5,16 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta12] - 2026-07-22
+
+### Security
+- **Remove passwords from the repository.** Golden login password is no longer
+  hard-coded in Python, kickstart, or autoinstall. Operators supply it via
+  `OVBUILDER_GOLDEN_PASSWORD` or `~/.config/ovbuilder/secrets.env` (see
+  `docs/SECRETS.md`). Packer seeds are `.pkrtpl` templates filled from
+  **gitignored** `variables.auto.pkrvars.hcl` (`ssh_password` /
+  `ssh_password_crypted`). Rotate any previously committed lab password.
+
 ## [0.97-beta11] - 2026-07-22
 
 ### Fixed
@@ -18,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Ubuntu golden login**: password not usable for console/SSH. Clone-time
-  guestinfo now re-applies `ChangeMe-BuildOnly!` for the golden default user
+  guestinfo now re-applies `<golden-password>` for the golden default user
   (`ubuntu` / `almalinux`) and `root` via chpasswd + runcmd. Ubuntu Packer
   autoinstall late-commands also force those passwords on the template.
 

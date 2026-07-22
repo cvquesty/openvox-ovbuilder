@@ -62,6 +62,17 @@ variable "disk_gb" {
   default = 40
 }
 
+# Golden login — local pkrvars only (gitignored). Never commit real values.
+variable "ssh_password" {
+  type      = string
+  sensitive = true
+}
+# openssl passwd -6 'same-password-as-ssh_password'
+variable "ssh_password_crypted" {
+  type      = string
+  sensitive = true
+}
+
 locals {
   iso_paths = var.iso_datastore != "" ? ["[${var.iso_datastore}] ${var.iso_path}"] : ["[${var.datastore}] ${var.iso_path}"]
 }
@@ -103,7 +114,10 @@ source "vsphere-iso" "ubuntu2404" {
   # at the ISO root. meta-data may be empty; user-data holds #cloud-config
   # autoinstall: ... (NOT a bare autoinstall.yaml).
   cd_content = {
-    "user-data" = file("${path.cwd}/ubuntu-24.04/http/user-data")
+    "user-data" = templatefile("${path.cwd}/ubuntu-24.04/http/user-data.pkrtpl", {
+      ssh_password          = var.ssh_password
+      ssh_password_crypted  = var.ssh_password_crypted
+    })
     "meta-data" = file("${path.cwd}/ubuntu-24.04/http/meta-data")
   }
   cd_label = "cidata"

@@ -38,9 +38,7 @@ import base64
 import shlex
 from typing import Optional
 
-# Baked into Packer goldens (Alma kickstart + Ubuntu autoinstall).
-# Also re-applied at clone time so a broken golden password does not brick login.
-GOLDEN_DEFAULT_PASSWORD = "ChangeMe-BuildOnly!"
+from .secrets import get_golden_password, require_golden_password
 
 
 def _b64(s: str) -> str:
@@ -229,10 +227,13 @@ def build_userdata(
     dns: Optional[str] = None,
     domain: str = "",
     default_user: str = "ubuntu",
-    password: str = GOLDEN_DEFAULT_PASSWORD,
+    password: Optional[str] = None,
 ) -> str:
     """
-    Build cloud-init **user-data**: hostname, passwords, disable CI network, apply IP.
+    Build cloud-init **user-data**: hostname, optional passwords, net apply.
+
+    ``password`` must come from the operator (env / secrets.env). If omitted,
+    chpasswd blocks are not emitted (network + hostname still apply).
     """
     fqdn = f"{hostname}.{domain}" if domain else hostname
     script = _network_configure_script(
@@ -243,7 +244,7 @@ def build_userdata(
         f"      {line}" if line else "      " for line in body_lines
     )
     user = (default_user or "ubuntu").strip() or "ubuntu"
-    pw = password or GOLDEN_DEFAULT_PASSWORD
+    pw = (password or "").strip()
 
     lines = [
         "#cloud-config",
@@ -255,11 +256,17 @@ def build_userdata(
         "package_upgrade: false",
         "ssh_pwauth: true",
         "disable_root: false",
-        "chpasswd:",
-        "  expire: false",
-        "  list: |",
-        f"    {user}:{pw}",
-        f"    root:{pw}",
+    ]
+    if pw:
+        # Password never hard-coded in the repo — supplied at runtime only.
+        lines += [
+            "chpasswd:",
+            "  expire: false",
+            "  list: |",
+            f"    {user}:{pw}",
+            f"    root:{pw}",
+        ]
+    lines += [
         "# Guest OS network is applied by ovbuilder-net.sh (netplan or nmcli).",
         "network:",
         "  config: disabled",
@@ -273,7 +280,16 @@ def build_userdata(
         script_block,
         "runcmd:",
         f"  - [hostnamectl, set-hostname, {hostname}]",
-        f"  - [bash, -c, \"echo '{user}:{pw}' | chpasswd; echo 'root:{pw}' | chpasswd\"]",
+    ]
+    if pw:
+        # shlex-safe single quotes inside the bash -c string
+        safe_user = user.replace("'", "")
+        safe_pw = pw.replace("'", "'\\''")
+        lines.append(
+            f"  - [bash, -c, \"echo '{safe_user}:{safe_pw}' | chpasswd; "
+            f"echo 'root:{safe_pw}' | chpasswd\"]"
+        )
+    lines += [
         "  - [/usr/local/sbin/ovbuilder-net.sh]",
         f'final_message: "ovbuilder cloud-init finished for {hostname}"',
         "",
@@ -289,11 +305,19 @@ def guestinfo_extra_config(
     dns: Optional[str] = None,
     domain: str = "",
     default_user: str = "ubuntu",
-    password: str = GOLDEN_DEFAULT_PASSWORD,
+    password: Optional[str] = None,
+    *,
+    require_password: bool = True,
 ) -> dict:
     """
     Return a dict for Terraform ``extra_config`` / ``guestinfo_extra_config``.
+
+    Password is resolved from ``password`` arg or local secrets / env
+    (see ``ovbuilder.secrets``). Never from a default in source control.
     """
+    pw = (password or "").strip() or get_golden_password()
+    if require_password and not pw:
+        pw = require_golden_password("golden clone guestinfo")
     meta = build_metadata(hostname, domain=domain)
     user = build_userdata(
         hostname,
@@ -303,7 +327,7 @@ def guestinfo_extra_config(
         dns=dns,
         domain=domain,
         default_user=default_user,
-        password=password,
+        password=pw,
     )
     return {
         "guestinfo.metadata": _b64(meta),

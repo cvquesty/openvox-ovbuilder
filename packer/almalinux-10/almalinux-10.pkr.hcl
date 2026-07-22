@@ -61,6 +61,13 @@ variable "disk_gb" {
   default = 40
 }
 
+# Golden login password — supply only via gitignored pkrvars / PKR_VAR_ssh_password.
+# Never commit real values.
+variable "ssh_password" {
+  type      = string
+  sensitive = true
+}
+
 locals {
   iso_paths = var.iso_datastore != "" ? ["[${var.iso_datastore}] ${var.iso_path}"] : ["[${var.datastore}] ${var.iso_path}"]
 }
@@ -98,7 +105,9 @@ source "vsphere-iso" "almalinux10" {
   iso_paths = local.iso_paths
 
   cd_content = {
-    "ks.cfg" = file("${path.cwd}/almalinux-10/http/ks.cfg")
+    "ks.cfg" = templatefile("${path.cwd}/almalinux-10/http/ks.cfg.pkrtpl", {
+      ssh_password = var.ssh_password
+    })
   }
   cd_label = "OEMDRV"
 

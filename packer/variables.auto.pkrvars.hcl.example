@@ -1,9 +1,9 @@
-# Copy to variables.auto.pkrvars.hcl (gitignored) or export PKR_VAR_* instead.
-# Never commit real passwords.
+# Copy to variables.auto.pkrvars.hcl (gitignored) — NEVER commit the copy.
+# See docs/SECRETS.md
 
 vcenter_server   = "vcenter.example.com"
 vcenter_username = "administrator@vsphere.local"
-vcenter_password = "change-me"
+vcenter_password = "replace-me-not-in-git"
 
 datacenter = "Main DC"
 cluster    = "Production Cluster"
@@ -11,14 +11,16 @@ datastore  = "vsanDatastore"
 network    = "VM Network"
 folder     = "Templates"
 
-# Optional: where ISOs live on the datastore (used if iso_path is relative)
 iso_datastore = "isos"
-
-# Build-time insecure SSL (lab only)
 insecure_connection = true
 
-# Default login password baked into goldens (change immediately in prod)
-ssh_password = "ChangeMe-BuildOnly!"
+# Golden guest login (same value you put in ~/.config/ovbuilder/secrets.env
+# as OVBUILDER_GOLDEN_PASSWORD for clones).
+ssh_password = "replace-me-not-in-git"
 
-# Optional: inject your public key into the golden
+# Ubuntu autoinstall identity requires a crypt hash of the same password:
+#   openssl passwd -6 'replace-me-not-in-git'
+ssh_password_crypted = "$6$rounds=5000$saltsalt$replace-with-openssl-passwd-6-output"
+
+# Optional:
 # ssh_public_key = "ssh-ed25519 AAAA... you@example.com"

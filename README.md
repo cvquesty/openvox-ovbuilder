@@ -26,6 +26,12 @@ A delightful, standards-based command-line tool that turns "I need a new OpenVox
 
 Think of it as the friendly older sibling to raw `terraform apply` — it discovers your vSphere inventory, lets you pick real datastores and ISOs, runs Terraform, then reaches inside the fresh VM to run the official OpenVox agent bootstrap so your new box phones home immediately.
 
+
+## Secrets
+
+**Do not commit passwords or vCenter credentials.**  
+Configure lab secrets locally — see [docs/SECRETS.md](docs/SECRETS.md).
+
 ## 🎯 What is ovbuilder?
 
 If you've ever found yourself:

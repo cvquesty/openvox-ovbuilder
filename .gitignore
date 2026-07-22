@@ -1,8 +1,16 @@
-# Packer local vars (secrets)
+# Packer local vars (secrets) — never commit
 packer/variables.auto.pkrvars.hcl
 packer/**/packer_cache/
 *.pkrvars.hcl
 !*.pkrvars.hcl.example
+
+# Operator secrets (XDG copies are outside the repo; ignore if placed here)
+secrets.env
+secrets.yaml
+**/secrets.env
+**/secrets.yaml
+.env
+.env.*
 
 # Python
 __pycache__/
