@@ -100,6 +100,36 @@ def get_golden_password() -> Optional[str]:
     return None
 
 
+def golden_password_setup_help() -> str:
+    """
+    Operator-facing instructions when the golden password is missing.
+
+    Always points at ``~/.config/ovbuilder/secrets.env`` (resolved path).
+    """
+    env_path = secrets_env_path()
+    return (
+        "Golden guest password is not configured.\n"
+        "\n"
+        "ovbuilder will not bake a default password into git or the install.\n"
+        "Create a local secrets file (never commit it):\n"
+        "\n"
+        f"  mkdir -p {secrets_dir()}\n"
+        f"  chmod 700 {secrets_dir()}\n"
+        f"  cat > {env_path} <<'EOF'\n"
+        f"  {ENV_GOLDEN_PASSWORD}='your-lab-password'\n"
+        f"  EOF\n"
+        f"  chmod 600 {env_path}\n"
+        "\n"
+        "Or export for this shell only:\n"
+        "\n"
+        f"  export {ENV_GOLDEN_PASSWORD}='your-lab-password'\n"
+        "\n"
+        "Then re-run:  ovbuilder build\n"
+        "\n"
+        "Details: docs/SECRETS.md"
+    )
+
+
 def require_golden_password(context: str = "golden clone") -> str:
     """
     Return golden password or raise RuntimeError with setup instructions.
@@ -107,12 +137,7 @@ def require_golden_password(context: str = "golden clone") -> str:
     pw = get_golden_password()
     if pw:
         return pw
-    env_path = secrets_env_path()
     raise RuntimeError(
-        f"No golden password configured for {context}.\n"
-        f"  Set {ENV_GOLDEN_PASSWORD} in the environment, or create:\n"
-        f"    {env_path}\n"
-        f"  with a line:\n"
-        f"    {ENV_GOLDEN_PASSWORD}='your-lab-password'\n"
-        f"  chmod 600 that file. Do not commit it. See docs/SECRETS.md."
+        f"No golden password configured for {context}.\n\n"
+        + golden_password_setup_help()
     )

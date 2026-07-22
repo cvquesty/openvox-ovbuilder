@@ -42,10 +42,44 @@ from . import vsphere
 from .cloud_init import guestinfo_extra_config
 from .config import OvbuilderConfig, get_config_manager
 from .network import PrefixParseError, parse_cidr_prefix, prefix_to_netmask
+from .secrets import get_golden_password, golden_password_setup_help, secrets_env_path
 from .ssh import run_post_install_steps
 from .terraform import run_terraform_apply
 
 console = Console()
+
+
+def _ensure_golden_password_configured() -> None:
+    """
+    Fail early in golden mode if no local secrets file / env password.
+
+    Prints a clear panel pointing at ~/.config/ovbuilder/secrets.env so the
+    operator is not surprised mid-interview or after Terraform starts.
+    """
+    if get_golden_password():
+        return
+    path = secrets_env_path()
+    console.print(
+        Panel.fit(
+            "[bold red]Golden password not configured[/bold red]\n\n"
+            "Clones need a guest login password from a [bold]local[/bold] secrets "
+            "file (never committed to git).\n\n"
+            f"Create [cyan]{path}[/cyan] if it does not exist:\n\n"
+            f"  mkdir -p {path.parent}\n"
+            f"  chmod 700 {path.parent}\n"
+            f"  echo \"OVBUILDER_GOLDEN_PASSWORD='your-lab-password'\" > {path}\n"
+            f"  chmod 600 {path}\n\n"
+            "Or for this shell only:\n\n"
+            "  export OVBUILDER_GOLDEN_PASSWORD='your-lab-password'\n\n"
+            "Then re-run:  [bold]ovbuilder build[/bold]\n\n"
+            "[dim]See docs/SECRETS.md[/dim]",
+            title="Missing secrets.env",
+            border_style="red",
+        )
+    )
+    # Full multi-line help also goes to stderr-style console for copy/paste.
+    console.print(f"\n[dim]{golden_password_setup_help()}[/dim]\n")
+    raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +275,11 @@ def build(
     )
     tf_dir = get_config_manager().get_effective_terraform_dir()
     provision_mode = _normalize_provision_mode(mode, cfg.provision_mode)
+
+    # Golden clones inject guest password via cloud-init — require local secrets
+    # before any interview / vCenter work so the operator sees the fix first.
+    if provision_mode == "golden":
+        _ensure_golden_password_configured()
 
     # Interactive when required identity pieces are missing (unless -y).
     if provision_mode == "golden":
