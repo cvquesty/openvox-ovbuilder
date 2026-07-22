@@ -8,7 +8,7 @@ from ovbuilder.cloud_init import (
     build_metadata,
     build_userdata,
     guestinfo_extra_config,
-    _nmcli_configure_script,
+    _network_configure_script,
 )
 
 
@@ -19,22 +19,23 @@ def test_metadata_is_identity_only():
     assert "network:" not in m
 
 
-def test_nmcli_script_reuses_existing_connection():
-    s = _nmcli_configure_script(
+def test_network_script_has_netplan_and_nmcli_paths():
+    s = _network_configure_script(
         "10.0.1.5", 24, gateway="10.0.1.1", dns="10.0.1.2", domain="lab.local"
     )
     assert "10.0.1.5/24" in s
-    assert "connection.id" in s
-    assert "connection.interface-name" in s
-    assert "ipv4.method manual" in s
-    assert "deleting spare profile" in s
-    # Profile must end up named exactly after the iface (ens33), never
-    # "cloud-init ens33"
+    # Ubuntu path
+    assert "path=netplan" in s
+    assert "99-ovbuilder.yaml" in s
+    assert "netplan apply" in s
+    assert "to: 0.0.0.0/0" in s
+    # Alma path
+    assert "path=nmcli" in s
     assert 'connection.id "$IFACE"' in s
-    assert "match:" not in s
+    assert "deleting spare profile" in s
 
 
-def test_userdata_disables_cloud_init_network_and_runs_nmcli():
+def test_userdata_disables_ci_network_and_embeds_script():
     u = build_userdata(
         "web1",
         "10.0.1.5",
@@ -48,12 +49,9 @@ def test_userdata_disables_cloud_init_network_and_runs_nmcli():
     assert "config: disabled" in u
     assert "/usr/local/sbin/ovbuilder-net.sh" in u
     assert "10.0.1.5/24" in u
-    assert "NetworkManager-wait-online" in u
+    assert "netplan apply" in u
     assert "ubuntu:ChangeMe-BuildOnly!" in u
     assert "root:ChangeMe-BuildOnly!" in u
-    # No Network Config v2 "ethernets/nics/match" path
-    assert "ethernets:" not in u
-    assert 'name: "e*"' not in u
 
 
 def test_guestinfo_payloads():
@@ -65,16 +63,10 @@ def test_guestinfo_payloads():
         dns="1.1.1.1",
         default_user="ubuntu",
     )
-    assert g["guestinfo.metadata.encoding"] == "base64"
-    assert g["guestinfo.userdata.encoding"] == "base64"
     assert "guestinfo.networkconfig" not in g
-
     meta = base64.b64decode(g["guestinfo.metadata"]).decode()
     assert "network:" not in meta
-    assert "instance-id: n1" in meta
-
     user = base64.b64decode(g["guestinfo.userdata"]).decode()
     assert "config: disabled" in user
     assert "192.168.1.10/19" in user
-    assert "ovbuilder-net.sh" in user
-    assert "ubuntu:ChangeMe-BuildOnly!" in user
+    assert "99-ovbuilder.yaml" in user

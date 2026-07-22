@@ -14,25 +14,22 @@ VMware Tools + cloud-init read ``guestinfo.metadata`` and
 ``guestinfo.userdata`` from the VM's extraConfig (set by Terraform).
 
 =============================================================================
-NETWORK STRATEGY (simplified — do not invent new NM profiles)
+NETWORK STRATEGY
 =============================================================================
-cloud-init's Network Config v2 renderer on Alma/RHEL creates *new*
-NetworkManager profiles such as ``cloud-init nics`` while leaving the
-stock ``Wired connection 1`` on ens33. Result: nmtui shows a pretty
-profile, ``ip addr`` has no address, boot looks broken.
+cloud-init's own Network Config v2 renderer is **disabled**. It creates
+orphan NM profiles (``cloud-init nics``) or leaves Ubuntu netplan with
+``dhcp4: false`` and no addresses (golden autoinstall hygiene).
 
-We therefore:
+Clone-time ``/usr/local/sbin/ovbuilder-net.sh`` applies interview data:
 
-  1. Tell cloud-init **not** to manage network at all
-     (``network: {config: disabled}`` in user-data).
-  2. In ``runcmd``, use **nmcli** to find the existing primary ethernet
-     connection (or the one already bound to the first ``e*`` iface) and
-     **modify it in place** — same interface, same connection name when
-     possible — then ``nmcli connection up``.
-  3. Delete leftover ethernet profiles that would fight for the NIC
-     (other "Wired connection *" / "cloud-init *" clones).
+  * **Ubuntu** (``/etc/netplan`` present): write ``99-ovbuilder.yaml`` for the
+    real iface name (e.g. ens33), remove conflicting netplan files, ``netplan apply``.
+  * **Alma/RHEL** (NetworkManager / nmcli): modify the existing connection
+    **in place**, rename profile to the iface name only (``ens33``, not
+    ``cloud-init ens33``), delete spare ethernet profiles, bring it up.
+  * **Fallback**: ``ip addr`` / ``ip route`` if neither stack is available.
 
-Hostname still comes from metadata + user-data as usual.
+Hostname / passwords still come from metadata + user-data as usual.
 """
 
 from __future__ import annotations
@@ -55,7 +52,7 @@ def build_metadata(hostname: str, domain: str = "") -> str:
     """
     Build cloud-init **metadata** YAML (instance-id + hostname only).
 
-    No network block — network is applied via nmcli in user-data runcmd.
+    No network block — network is applied via ovbuilder-net.sh in runcmd.
     """
     _ = domain
     return (
@@ -65,7 +62,7 @@ def build_metadata(hostname: str, domain: str = "") -> str:
     )
 
 
-def _nmcli_configure_script(
+def _network_configure_script(
     ip: str,
     prefix: int,
     gateway: Optional[str] = None,
@@ -73,14 +70,31 @@ def _nmcli_configure_script(
     domain: str = "",
 ) -> str:
     """
-    Bash script body (no shebang) that reconfigures the primary ethernet
-    connection in place via nmcli.
+    Bash body (no shebang): configure primary e* NIC via netplan or nmcli.
     """
     gw = (gateway or "").strip()
     dns1 = (dns or "").strip()
     dom = (domain or "").strip()
+    ip_cidr = f"{ip}/{prefix}"
 
-    # Build optional nmcli modify fragments (already shell-safe values).
+    # Netplan optional blocks (Python-expanded constants; IFACE is bash runtime).
+    routes_block = ""
+    if gw:
+        routes_block = (
+            "      routes:\n"
+            "        - to: 0.0.0.0/0\n"
+            f"          via: {gw}\n"
+        )
+    nameservers_block = ""
+    if dns1:
+        nameservers_block = (
+            "      nameservers:\n"
+            f"        addresses: [{dns1}]\n"
+        )
+        if dom:
+            nameservers_block += f"        search: [{dom}]\n"
+
+    # nmcli optional modify args
     extra_mod: list[str] = []
     if gw:
         extra_mod.append(f"ipv4.gateway {shlex.quote(gw)}")
@@ -94,10 +108,8 @@ def _nmcli_configure_script(
         extra_mod.append(f"ipv4.dns-search {shlex.quote(dom)}")
     else:
         extra_mod.append("ipv4.dns-search ''")
-    extra = " ".join(extra_mod)
-
-    # Script uses only single-quoted nmcli args via shlex for IP pieces.
-    ip_cidr = shlex.quote(f"{ip}/{prefix}")
+    nm_extra = " ".join(extra_mod)
+    ip_cidr_q = shlex.quote(ip_cidr)
 
     return f"""
 set +e
@@ -107,58 +119,106 @@ if [ -z "$IFACE" ]; then
   echo "ovbuilder-net: no ethernet interface found" >&2
   exit 1
 fi
-echo "ovbuilder-net: primary iface=$IFACE"
+echo "ovbuilder-net: primary iface=$IFACE ip={ip_cidr}"
 
-# Prefer connection already bound to that device (any name)
-CONN=$(nmcli -t -f NAME,DEVICE connection show 2>/dev/null \\
-  | awk -F: -v i="$IFACE" '$2 == i {{ print $1; exit }}')
-
-# Else first ethernet-type connection
-if [ -z "$CONN" ]; then
-  CONN=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \\
-    | awk -F: '$2 == "802-3-ethernet" {{ print $1; exit }}')
+# ---------------------------------------------------------------------------
+# Ubuntu: netplan owns addressing (systemd-networkd). Golden autoinstall left
+# dhcp4:false with no addresses — ip addr stays empty until we write netplan.
+# ---------------------------------------------------------------------------
+if [ -d /etc/netplan ] && command -v netplan >/dev/null 2>&1; then
+  echo "ovbuilder-net: path=netplan"
+  for f in /etc/netplan/*.yaml /etc/netplan/*.yml; do
+    [ -f "$f" ] || continue
+    case "$f" in
+      */99-ovbuilder.yaml) continue ;;
+    esac
+    echo "ovbuilder-net: removing conflicting $f"
+    rm -f "$f"
+  done
+  cat > /etc/netplan/99-ovbuilder.yaml <<EOF
+network:
+  version: 2
+  ethernets:
+    $IFACE:
+      dhcp4: false
+      dhcp6: false
+      addresses:
+        - {ip_cidr}
+{routes_block}{nameservers_block}EOF
+  chmod 600 /etc/netplan/99-ovbuilder.yaml
+  echo "ovbuilder-net: wrote /etc/netplan/99-ovbuilder.yaml"
+  cat /etc/netplan/99-ovbuilder.yaml
+  netplan generate 2>/dev/null || true
+  netplan apply
+  sleep 1
+  ip -br addr show "$IFACE" || true
+  ip route | head -10 || true
+  exit 0
 fi
 
-# Create only if none exists — always named exactly after the iface
-if [ -z "$CONN" ]; then
-  nmcli connection add type ethernet ifname "$IFACE" con-name "$IFACE" \\
-    ipv4.method manual ipv6.method ignore
+# ---------------------------------------------------------------------------
+# Alma / RHEL: NetworkManager — edit existing profile in place, name = iface
+# ---------------------------------------------------------------------------
+if command -v nmcli >/dev/null 2>&1; then
+  echo "ovbuilder-net: path=nmcli"
+  CONN=$(nmcli -t -f NAME,DEVICE connection show 2>/dev/null \\
+    | awk -F: -v i="$IFACE" '$2 == i {{ print $1; exit }}')
+  if [ -z "$CONN" ]; then
+    CONN=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \\
+      | awk -F: '$2 == "802-3-ethernet" {{ print $1; exit }}')
+  fi
+  if [ -z "$CONN" ]; then
+    nmcli connection add type ethernet ifname "$IFACE" con-name "$IFACE" \\
+      ipv4.method manual ipv6.method ignore
+    CONN="$IFACE"
+    echo "ovbuilder-net: created connection $CONN"
+  else
+    echo "ovbuilder-net: found connection '$CONN' — renaming to $IFACE"
+  fi
+  nmcli connection modify "$CONN" \\
+    connection.id "$IFACE" \\
+    connection.interface-name "$IFACE" \\
+    connection.autoconnect yes \\
+    connection.autoconnect-priority 100 \\
+    ipv4.method manual \\
+    ipv4.addresses {ip_cidr_q} \\
+    ipv6.method ignore \\
+    {nm_extra}
   CONN="$IFACE"
-  echo "ovbuilder-net: created connection $CONN"
-else
-  echo "ovbuilder-net: found connection '$CONN' — will rename to $IFACE"
+  nmcli -t -f NAME,TYPE connection show 2>/dev/null | while IFS=: read -r name typ; do
+    [ "$typ" = "802-3-ethernet" ] || continue
+    [ "$name" = "$CONN" ] && continue
+    echo "ovbuilder-net: deleting spare profile '$name'"
+    nmcli connection delete "$name" 2>/dev/null || true
+  done
+  nmcli connection up "$CONN" || nmcli device reapply "$IFACE" || true
+  ip -br addr show "$IFACE" || true
+  exit 0
 fi
 
-# Configure in place AND force profile name to the iface only
-# (must not stay as "cloud-init ens33" or "Wired connection 1").
-# connection.id is the NM profile name shown in nmtui/nmcli.
-nmcli connection modify "$CONN" \\
-  connection.id "$IFACE" \\
-  connection.interface-name "$IFACE" \\
-  connection.autoconnect yes \\
-  connection.autoconnect-priority 100 \\
-  ipv4.method manual \\
-  ipv4.addresses {ip_cidr} \\
-  ipv6.method ignore \\
-  {extra}
-
-# After rename, the profile is always $IFACE
-CONN="$IFACE"
-
-# Drop every other ethernet profile (cloud-init *, Wired connection *, …)
-nmcli -t -f NAME,TYPE connection show 2>/dev/null | while IFS=: read -r name typ; do
-  [ "$typ" = "802-3-ethernet" ] || continue
-  [ "$name" = "$CONN" ] && continue
-  echo "ovbuilder-net: deleting spare profile '$name'"
-  nmcli connection delete "$name" 2>/dev/null || true
-done
-
-# Activate under the clean name
-nmcli connection up "$CONN" || nmcli device reapply "$IFACE" || true
-echo "ovbuilder-net: done (connection name=$CONN)"
-nmcli -t -f NAME,DEVICE,FILENAME connection show --active 2>/dev/null | head -20
+# ---------------------------------------------------------------------------
+# Last resort: raw iproute2
+# ---------------------------------------------------------------------------
+echo "ovbuilder-net: path=iproute2"
+ip link set "$IFACE" up || true
+ip addr flush dev "$IFACE" 2>/dev/null || true
+ip addr add {ip_cidr_q} dev "$IFACE" || true
+{("ip route replace default via " + shlex.quote(gw) + ' || true') if gw else "true"}
 ip -br addr show "$IFACE" || true
 """.strip()
+
+
+# Back-compat alias for tests / imports
+def _nmcli_configure_script(
+    ip: str,
+    prefix: int,
+    gateway: Optional[str] = None,
+    dns: Optional[str] = None,
+    domain: str = "",
+) -> str:
+    return _network_configure_script(
+        ip, prefix, gateway=gateway, dns=dns, domain=domain
+    )
 
 
 def build_userdata(
@@ -172,22 +232,18 @@ def build_userdata(
     password: str = GOLDEN_DEFAULT_PASSWORD,
 ) -> str:
     """
-    Build cloud-init **user-data**: hostname, passwords, disable CI network, nmcli.
+    Build cloud-init **user-data**: hostname, passwords, disable CI network, apply IP.
     """
     fqdn = f"{hostname}.{domain}" if domain else hostname
-    script = _nmcli_configure_script(
+    script = _network_configure_script(
         ip, prefix, gateway=gateway, dns=dns, domain=domain
     )
-    # Embed script as write_files content (YAML | block needs > key indent).
     body_lines = ["#!/bin/bash", *script.splitlines()]
     script_block = "\n".join(
         f"      {line}" if line else "      " for line in body_lines
     )
-    # default_user is almalinux or ubuntu depending on golden; also set root.
     user = (default_user or "ubuntu").strip() or "ubuntu"
     pw = password or GOLDEN_DEFAULT_PASSWORD
-    # chpasswd list: user:pass one per line (cloud-init classic form)
-    chpasswd_list = f"{user}:{pw}\\nroot:{pw}"
 
     lines = [
         "#cloud-config",
@@ -199,13 +255,12 @@ def build_userdata(
         "package_upgrade: false",
         "ssh_pwauth: true",
         "disable_root: false",
-        # Re-assert golden password on first clone boot (fixes broken goldens).
         "chpasswd:",
         "  expire: false",
         "  list: |",
         f"    {user}:{pw}",
         f"    root:{pw}",
-        "# Do NOT let cloud-init invent NM profiles (orphan nics/eth0 names).",
+        "# Guest OS network is applied by ovbuilder-net.sh (netplan or nmcli).",
         "network:",
         "  config: disabled",
         "bootcmd:",
@@ -218,13 +273,11 @@ def build_userdata(
         script_block,
         "runcmd:",
         f"  - [hostnamectl, set-hostname, {hostname}]",
-        # Belt-and-suspenders if chpasswd module order races users
         f"  - [bash, -c, \"echo '{user}:{pw}' | chpasswd; echo 'root:{pw}' | chpasswd\"]",
         "  - [/usr/local/sbin/ovbuilder-net.sh]",
         f'final_message: "ovbuilder cloud-init finished for {hostname}"',
         "",
     ]
-    _ = chpasswd_list  # reserved if we switch formats
     return "\n".join(lines)
 
 
@@ -240,11 +293,6 @@ def guestinfo_extra_config(
 ) -> dict:
     """
     Return a dict for Terraform ``extra_config`` / ``guestinfo_extra_config``.
-
-    Keys
-    ----
-    guestinfo.metadata / .encoding — instance-id + hostname only
-    guestinfo.userdata / .encoding — hostname, passwords, network, nmcli
     """
     meta = build_metadata(hostname, domain=domain)
     user = build_userdata(

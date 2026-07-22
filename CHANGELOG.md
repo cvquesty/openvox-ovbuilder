@@ -5,6 +5,15 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta11] - 2026-07-22
+
+### Fixed
+- **Ubuntu clone: `ip addr` empty** — nmcli-only apply does nothing useful on
+  Ubuntu Server (netplan/networkd). `ovbuilder-net.sh` now detects netplan,
+  writes `/etc/netplan/99-ovbuilder.yaml` for the real iface (e.g. ens33),
+  removes conflicting installer/cloud-init netplan (dhcp4:false, no address),
+  and runs `netplan apply`. Alma still uses nmcli in-place path.
+
 ## [0.97-beta10] - 2026-07-22
 
 ### Fixed
