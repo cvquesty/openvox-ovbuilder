@@ -28,8 +28,9 @@ def test_nmcli_script_reuses_existing_connection():
     assert "connection.interface-name" in s
     assert "ipv4.method manual" in s
     assert "deleting spare profile" in s
-    # Must not invent cloud-init profile names
-    assert "cloud-init" not in s
+    # Prefer reusing Wired connection / iface name — not a CI renderer profile
+    assert 'con-name "cloud' not in s
+    assert "match:" not in s
 
 
 def test_userdata_disables_cloud_init_network_and_runs_nmcli():

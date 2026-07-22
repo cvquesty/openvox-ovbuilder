@@ -5,6 +5,11 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta8] - 2026-07-22
+
+### Fixed
+- Correct YAML indentation for `write_files` nmcli script in user-data.
+
 ## [0.97-beta7] - 2026-07-22
 
 ### Fixed

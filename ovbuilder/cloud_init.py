@@ -135,8 +135,8 @@ nmcli connection modify "$CONN" \\
   ipv6.method ignore \\
   {extra}
 
-# Drop other ethernet profiles so they cannot steal ens33 (DHCP Wired *,
-# cloud-init nics, cloud-init eth0, etc.)
+# Drop other ethernet profiles so they cannot steal the primary NIC
+# (stock DHCP "Wired connection *", prior ovbuilder leftovers, etc.).
 nmcli -t -f NAME,TYPE connection show 2>/dev/null | while IFS=: read -r name typ; do
   [ "$typ" = "802-3-ethernet" ] || continue
   [ "$name" = "$CONN" ] && continue
@@ -166,10 +166,10 @@ def build_userdata(
     script = _nmcli_configure_script(
         ip, prefix, gateway=gateway, dns=dns, domain=domain
     )
-    # Embed script as a write_files payload, then run it once from runcmd.
-    # YAML literal block for the script body.
-    script_indented = "\n".join(
-        f"    {line}" if line else "" for line in script.splitlines()
+    # Embed script as write_files content (YAML | block needs > key indent).
+    body_lines = ["#!/bin/bash", *script.splitlines()]
+    script_block = "\n".join(
+        f"      {line}" if line else "      " for line in body_lines
     )
 
     lines = [
@@ -180,7 +180,7 @@ def build_userdata(
         "manage_etc_hosts: true",
         "package_update: false",
         "package_upgrade: false",
-        "# Do NOT let cloud-init invent NM profiles (cloud-init nics, etc.).",
+        "# Do NOT let cloud-init invent NM profiles (orphan nics/eth0 names).",
         "network:",
         "  config: disabled",
         "bootcmd:",
@@ -190,8 +190,7 @@ def build_userdata(
         "    permissions: '0755'",
         "    owner: root:root",
         "    content: |",
-        "    #!/bin/bash",
-        script_indented,
+        script_block,
         "runcmd:",
         f"  - [hostnamectl, set-hostname, {hostname}]",
         "  - [/usr/local/sbin/ovbuilder-net.sh]",
