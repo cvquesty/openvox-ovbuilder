@@ -5,6 +5,13 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta14] - 2026-07-22
+
+### Fixed
+- **Terraform deprecated `-state` flag** — per-VM state now uses the local
+  backend (`terraform init -backend-config=path=...`) with `TF_DATA_DIR` per
+  hostname instead of `-state` / `-state-out` / `-backup`.
+
 ## [0.97-beta13] - 2026-07-22
 
 ### Changed

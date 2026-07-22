@@ -93,7 +93,8 @@ def migrate_legacy_shared_state(tf_dir: Path) -> None:
 
     Older ovbuilder versions wrote a single shared state under the Terraform
     module directory. Leaving it there is dangerous if someone runs bare
-    ``terraform apply`` without -state=. Migration renames it into XDG.
+    ``terraform apply`` without a per-VM backend path. Migration renames it
+    into XDG.
     """
     legacy = tf_dir / "terraform.tfstate"
     if not legacy.is_file():
@@ -144,23 +145,38 @@ def migrate_legacy_shared_state(tf_dir: Path) -> None:
         console.print(f"[yellow]Could not migrate legacy state: {exc}[/yellow]")
 
 
-def ensure_terraform_init(tf_dir: Path, env: dict) -> bool:
+def ensure_terraform_init(
+    tf_dir: Path,
+    env: dict,
+    *,
+    state_path: Optional[Path] = None,
+    force_reconfigure: bool = False,
+) -> bool:
     """
-    Run ``terraform init`` only if .terraform is missing/empty.
+    Run ``terraform init`` with local backend path for this VM.
 
-    Providers are shared across per-VM state files (same module dir).
+    Uses backend ``path=`` (not deprecated ``-state=``). When ``state_path`` is
+    set, always passes ``-reconfigure`` so switching between per-VM states in
+    the same module directory is safe. Providers land under TF_DATA_DIR when set.
     """
-    terraform_meta = tf_dir / ".terraform"
-    if terraform_meta.is_dir() and any(terraform_meta.iterdir()):
+    terraform_meta = Path(env.get("TF_DATA_DIR") or (tf_dir / ".terraform"))
+    needs_init = force_reconfigure or not (
+        terraform_meta.is_dir() and any(terraform_meta.iterdir())
+    )
+    # Backend path must be applied whenever we target a specific state file.
+    if state_path is not None:
+        needs_init = True
+
+    if not needs_init:
         return True
+
     console.print(f"[dim]terraform init in {tf_dir}…[/dim]")
+    cmd = ["terraform", "init", "-input=false", "-upgrade=false"]
+    if state_path is not None:
+        cmd.append("-reconfigure")
+        cmd.append(f"-backend-config=path={state_path}")
     try:
-        subprocess.run(
-            ["terraform", "init", "-input=false", "-upgrade=false"],
-            cwd=tf_dir,
-            env=env,
-            check=True,
-        )
+        subprocess.run(cmd, cwd=tf_dir, env=env, check=True)
         return True
     except subprocess.CalledProcessError as e:
         console.print(f"[red]terraform init failed (exit {e.returncode})[/red]")
@@ -209,10 +225,12 @@ def run_terraform_apply(
     vm_name = vars.get("vm_name") or "unnamed"
     sdir = state_dir_for_vm(vm_name)
     state_path = sdir / "terraform.tfstate"
-    backup_path = sdir / "terraform.tfstate.backup"
     var_file = sdir / "ovbuilder.auto.tfvars.json"
 
     env = os.environ.copy()
+    # Isolate plugin/backend metadata per VM so concurrent builds do not clobber
+    # each other's local backend path in a shared module directory.
+    env["TF_DATA_DIR"] = str(sdir / ".terraform")
 
     effective_user = vsphere_user or vars.get("vsphere_user")
     effective_password = vsphere_password or vars.get("vsphere_password")
@@ -231,13 +249,13 @@ def run_terraform_apply(
         env["TF_VAR_vsphere_server"] = str(effective_server)
         env["VSPHERE_SERVER"] = str(effective_server)
 
-    if not ensure_terraform_init(tf_dir, env):
-        return False
-
     migrate_legacy_shared_state(tf_dir)
     # Re-resolve after possible migration for this hostname.
     state_path = state_file_for_vm(vm_name)
-    backup_path = state_path.with_suffix(".tfstate.backup")
+
+    # Local backend path (modern replacement for -state=).
+    if not ensure_terraform_init(tf_dir, env, state_path=state_path):
+        return False
 
     # Normalize CLI "golden" → Terraform "clone".
     provision_mode = vars.get("provision_mode") or "clone"
@@ -273,15 +291,12 @@ def run_terraform_apply(
     }
     _write_var_file(var_file, tf_payload)
 
-    # Explicit -state/-state-out so we never touch the module-dir default state.
+    # No -state / -state-out / -backup — local backend owns the state file.
     cmd = [
         "terraform",
         "apply",
         "-auto-approve",
         "-input=false",
-        f"-state={state_path}",
-        f"-state-out={state_path}",
-        f"-backup={backup_path}",
         f"-var-file={var_file}",
     ]
 
