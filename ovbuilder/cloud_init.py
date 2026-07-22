@@ -105,28 +105,31 @@ if [ -z "$IFACE" ]; then
 fi
 echo "ovbuilder-net: primary iface=$IFACE"
 
-# Prefer connection already bound to that device
+# Prefer connection already bound to that device (any name)
 CONN=$(nmcli -t -f NAME,DEVICE connection show 2>/dev/null \\
   | awk -F: -v i="$IFACE" '$2 == i {{ print $1; exit }}')
 
-# Else first ethernet-type connection (e.g. "Wired connection 1")
+# Else first ethernet-type connection
 if [ -z "$CONN" ]; then
   CONN=$(nmcli -t -f NAME,TYPE connection show 2>/dev/null \\
     | awk -F: '$2 == "802-3-ethernet" {{ print $1; exit }}')
 fi
 
-# Only if nothing exists: add one named after the interface (not cloud-init *)
+# Create only if none exists — always named exactly after the iface
 if [ -z "$CONN" ]; then
   nmcli connection add type ethernet ifname "$IFACE" con-name "$IFACE" \\
     ipv4.method manual ipv6.method ignore
   CONN="$IFACE"
   echo "ovbuilder-net: created connection $CONN"
 else
-  echo "ovbuilder-net: reusing connection $CONN"
+  echo "ovbuilder-net: found connection '$CONN' — will rename to $IFACE"
 fi
 
-# Configure that connection in place; bind it to IFACE
+# Configure in place AND force profile name to the iface only
+# (must not stay as "cloud-init ens33" or "Wired connection 1").
+# connection.id is the NM profile name shown in nmtui/nmcli.
 nmcli connection modify "$CONN" \\
+  connection.id "$IFACE" \\
   connection.interface-name "$IFACE" \\
   connection.autoconnect yes \\
   connection.autoconnect-priority 100 \\
@@ -135,18 +138,21 @@ nmcli connection modify "$CONN" \\
   ipv6.method ignore \\
   {extra}
 
-# Drop other ethernet profiles so they cannot steal the primary NIC
-# (stock DHCP "Wired connection *", prior ovbuilder leftovers, etc.).
+# After rename, the profile is always $IFACE
+CONN="$IFACE"
+
+# Drop every other ethernet profile (cloud-init *, Wired connection *, …)
 nmcli -t -f NAME,TYPE connection show 2>/dev/null | while IFS=: read -r name typ; do
   [ "$typ" = "802-3-ethernet" ] || continue
   [ "$name" = "$CONN" ] && continue
-  echo "ovbuilder-net: deleting spare profile $name"
+  echo "ovbuilder-net: deleting spare profile '$name'"
   nmcli connection delete "$name" 2>/dev/null || true
 done
 
-# Activate
+# Activate under the clean name
 nmcli connection up "$CONN" || nmcli device reapply "$IFACE" || true
-echo "ovbuilder-net: done"
+echo "ovbuilder-net: done (connection name=$CONN)"
+nmcli -t -f NAME,DEVICE,FILENAME connection show --active 2>/dev/null | head -20
 ip -br addr show "$IFACE" || true
 """.strip()
 

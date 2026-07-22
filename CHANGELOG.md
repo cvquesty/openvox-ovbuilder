@@ -5,6 +5,13 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta9] - 2026-07-22
+
+### Fixed
+- NM profile name is the interface only (`ens33`), not `cloud-init ens33`.
+  After reusing whatever profile is on the NIC, set `connection.id` to
+  `$IFACE` and delete every other ethernet profile.
+
 ## [0.97-beta8] - 2026-07-22
 
 ### Fixed

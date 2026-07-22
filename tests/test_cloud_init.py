@@ -24,12 +24,13 @@ def test_nmcli_script_reuses_existing_connection():
         "10.0.1.5", 24, gateway="10.0.1.1", dns="10.0.1.2", domain="lab.local"
     )
     assert "10.0.1.5/24" in s
-    assert "reusing connection" in s
+    assert "connection.id" in s
     assert "connection.interface-name" in s
     assert "ipv4.method manual" in s
     assert "deleting spare profile" in s
-    # Prefer reusing Wired connection / iface name — not a CI renderer profile
-    assert 'con-name "cloud' not in s
+    # Profile must end up named exactly after the iface (ens33), never
+    # "cloud-init ens33"
+    assert 'connection.id "$IFACE"' in s
     assert "match:" not in s
 
 
