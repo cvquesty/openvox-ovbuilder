@@ -231,6 +231,11 @@ def build(
         None, "--gateway", help="Default gateway IP"
     ),
     dns: Optional[str] = typer.Option(None, "--dns", help="DNS server IP"),
+    skip_dnf_groups: bool = typer.Option(
+        False,
+        "--skip-dnf-groups",
+        help="Do not install configured DNF groups at clone/post-install time",
+    ),
 ):
     """
     Build a VM from a Packer golden template (default) or legacy ISO.
@@ -268,6 +273,8 @@ def build(
         gateway = None
     if _is_optioninfo(dns):
         dns = None
+    if _is_optioninfo(skip_dnf_groups):
+        skip_dnf_groups = False
 
     # --- Config + terraform path --------------------------------------------
     cfg: OvbuilderConfig = (
@@ -550,6 +557,13 @@ def build(
     memory = _coerce_sizing(memory, cfg.default_memory_gb)
     disk = _coerce_sizing(disk, cfg.default_disk_gb)
 
+    # Clone-time DNF groups (EL only; skipped on Ubuntu / when flag set).
+    dnf_groups = [] if skip_dnf_groups else list(cfg.dnf_groups or [])
+    if dnf_groups:
+        console.print(
+            f"[dim]DNF groups at provision time: {', '.join(dnf_groups)}[/dim]"
+        )
+
     # Guestinfo only for golden clones (ISO guests get network via SSH later).
     guestinfo = {}
     if provision_mode == "golden":
@@ -561,6 +575,7 @@ def build(
             dns=dns,
             domain=cfg.domain,
             default_user=default_user,
+            dnf_groups=dnf_groups,
         )
 
     # Map CLI golden → Terraform clone; keep iso as iso.
@@ -683,6 +698,8 @@ def build(
                 dns=dns,
                 openvox_server=cfg.openvox_server,
                 configure_network=False,
+                # Golden cloud-init already ran groups; do not re-run over SSH.
+                dnf_groups=[],
             )
             if ok:
                 console.print(
@@ -761,6 +778,7 @@ def build(
         dns=dns,
         openvox_server=cfg.openvox_server,
         configure_network=True,
+        dnf_groups=dnf_groups,
     )
     if ok:
         console.print(

@@ -38,6 +38,7 @@ import base64
 import shlex
 from typing import Optional
 
+from .packages import build_dnf_groupinstall_script, sanitize_dnf_groups
 from .secrets import get_golden_password, require_golden_password
 
 
@@ -228,6 +229,7 @@ def build_userdata(
     domain: str = "",
     default_user: str = "ubuntu",
     password: Optional[str] = None,
+    dnf_groups: Optional[list] = None,
 ) -> str:
     """
     Build cloud-init **user-data**: hostname, optional passwords, net apply.
@@ -245,6 +247,14 @@ def build_userdata(
     )
     user = (default_user or "ubuntu").strip() or "ubuntu"
     pw = (password or "").strip()
+    groups = sanitize_dnf_groups(dnf_groups)
+    dnf_script = build_dnf_groupinstall_script(groups) if groups else ""
+    dnf_block = ""
+    if dnf_script:
+        dnf_block = "\n".join(
+            f"      {line}" if line else "      "
+            for line in dnf_script.splitlines()
+        )
 
     lines = [
         "#cloud-config",
@@ -278,6 +288,16 @@ def build_userdata(
         "    owner: root:root",
         "    content: |",
         script_block,
+    ]
+    if dnf_block:
+        lines += [
+            "  - path: /usr/local/sbin/ovbuilder-dnf-groups.sh",
+            "    permissions: '0755'",
+            "    owner: root:root",
+            "    content: |",
+            dnf_block,
+        ]
+    lines += [
         "runcmd:",
         f"  - [hostnamectl, set-hostname, {hostname}]",
     ]
@@ -291,6 +311,11 @@ def build_userdata(
         )
     lines += [
         "  - [/usr/local/sbin/ovbuilder-net.sh]",
+    ]
+    if dnf_block:
+        # After network is up so base/appstream repos resolve.
+        lines.append("  - [/usr/local/sbin/ovbuilder-dnf-groups.sh]")
+    lines += [
         f'final_message: "ovbuilder cloud-init finished for {hostname}"',
         "",
     ]
@@ -306,6 +331,7 @@ def guestinfo_extra_config(
     domain: str = "",
     default_user: str = "ubuntu",
     password: Optional[str] = None,
+    dnf_groups: Optional[list] = None,
     *,
     require_password: bool = True,
 ) -> dict:
@@ -328,6 +354,7 @@ def guestinfo_extra_config(
         domain=domain,
         default_user=default_user,
         password=pw,
+        dnf_groups=dnf_groups,
     )
     return {
         "guestinfo.metadata": _b64(meta),

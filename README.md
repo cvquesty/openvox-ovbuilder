@@ -123,6 +123,7 @@ In non-interactive mode, datacenter / cluster / datastores / networks come from 
 - **Live vSphere discovery** — datacenters, clusters, datastores, networks via pyVmomi
 - **Legacy ISO mode** still available (`--mode iso`)
 - **Optional OpenVox agent bootstrap** over SSH after ACLs allow
+- **Clone-time DNF groups** — Server, Development Tools, and friends by default (config + `--skip-dnf-groups`)
 - **Self-contained** — bundled Terraform module + `install.sh` + Packer defs
 - **ovox design language** — Typer + Rich, XDG config, same vibe
 
@@ -134,8 +135,8 @@ In non-interactive mode, datacenter / cluster / datastores / networks come from 
 2. `ovbuilder build` — credentials + inventory discovery.
 3. **Select OS** (golden image) → interview hostname, IP, CIDR, gateway, DNS, sizing.
 4. Terraform **clones** the template with **per-VM state** and injects cloud-init guestinfo.
-5. VM boots; cloud-init applies hostname + static IP → **ready for SSH login**.
-6. When firewall/ACLs allow, install the OpenVox agent (optional prompt or manual curl).
+5. VM boots; cloud-init applies hostname + static IP, then installs configured **DNF groups** (EL only).
+6. Guest is **ready for SSH login**. When ACLs allow, install the OpenVox agent (optional prompt or manual curl).
 
 ### Legacy ISO path (`--mode iso` or `provision_mode: iso`)
 
@@ -166,6 +167,24 @@ openvox_server: openvox.example.com
 default_cpus: 2
 default_memory_gb: 4
 default_disk_gb: 80
+
+# Clone-time EL package groups (Anaconda / `dnf group list` display names).
+# Applied automatically on golden clones via cloud-init, and on ISO path
+# during SSH post-install. Skipped on Ubuntu. Set to [] to disable.
+# Override with --skip-dnf-groups on a single build.
+dnf_groups:
+  - Server
+  - Virtualization Host
+  - Console Internet Tools
+  - Container Management
+  - RPM Development Tools
+  - Development Tools
+  - Headless Management
+  - Legacy UNIX Compatibility
+  - Network Servers
+  - Scientific Support
+  - Security Tools
+  - System Tools
 
 # Optional curated shortcuts (interactive mode prefers live ISO listing)
 known_isos:

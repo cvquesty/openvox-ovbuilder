@@ -29,6 +29,8 @@ import paramiko
 from rich.console import Console
 from rich.panel import Panel
 
+from .packages import build_dnf_groupinstall_script, sanitize_dnf_groups
+
 console = Console()
 
 # Allow only safe tokens in shell-interpolated identity fields.
@@ -140,6 +142,42 @@ def _configure_network(
         console.print(f"[dim]Network config warning (non-fatal): {e}[/dim]")
 
 
+def _install_dnf_groups(client: paramiko.SSHClient, groups: list) -> None:
+    """
+    Upload and run the clone-time DNF group script over SSH.
+
+    Non-fatal: group failures are logged; SSH session continues.
+    """
+    clean = sanitize_dnf_groups(groups)
+    if not clean:
+        return
+    console.print(
+        f"[yellow]Installing {len(clean)} DNF group(s) inside guest...[/yellow]"
+    )
+    script = build_dnf_groupinstall_script(clean)
+    # Quoted heredoc — script body is literal, no guest expansion.
+    remote = (
+        "cat > /tmp/ovbuilder-dnf-groups.sh << 'EODNF'\n"
+        f"{script}"
+        "EODNF\n"
+        "chmod 755 /tmp/ovbuilder-dnf-groups.sh\n"
+        "sudo /tmp/ovbuilder-dnf-groups.sh"
+    )
+    try:
+        _stdin, stdout, _stderr = client.exec_command(
+            remote, get_pty=True, timeout=3600
+        )
+        for line in iter(stdout.readline, ""):
+            console.print(line.rstrip())
+        code = stdout.channel.recv_exit_status()
+        if code != 0:
+            console.print(
+                f"[yellow]DNF group script exited {code} (continuing)[/yellow]"
+            )
+    except Exception as exc:
+        console.print(f"[yellow]DNF group install warning: {exc}[/yellow]")
+
+
 def run_post_install_steps(
     ip: str,
     username: str,
@@ -150,6 +188,7 @@ def run_post_install_steps(
     dns: Optional[str] = None,
     openvox_server: str = "openvox.example.com",
     configure_network: bool = True,
+    dnf_groups: Optional[list] = None,
 ) -> bool:
     """
     SSH to the guest and optionally configure network + run agent bootstrap.
@@ -183,6 +222,10 @@ def run_post_install_steps(
                 _configure_network(client, hostname, ip, prefix, gateway, dns)
             except ValueError as exc:
                 console.print(f"[yellow]Skipping network config: {exc}[/yellow]")
+
+        # EL package groups (config defaults). No-op when list empty or Ubuntu.
+        if dnf_groups:
+            _install_dnf_groups(client, dnf_groups)
 
         # Official agent install entrypoint on OpenVox server :8140/packages
         openvox_server = _require_safe("openvox_server", openvox_server)

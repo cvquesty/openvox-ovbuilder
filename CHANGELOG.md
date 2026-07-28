@@ -5,6 +5,15 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta15] - 2026-07-28
+
+### Added
+- **Clone-time DNF groups** — `config.yaml` key `dnf_groups` installs EL package
+  groups after network identity is applied (cloud-init on golden clones; SSH
+  post-install on ISO mode). Defaults include Server, Virtualization Host,
+  Development Tools, System Tools, and related Anaconda groups. Ubuntu skips
+  the step. Disable with an empty list or `--skip-dnf-groups`.
+
 ## [0.97-beta14] - 2026-07-22
 
 ### Fixed

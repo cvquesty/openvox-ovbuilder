@@ -37,6 +37,26 @@ def test_userdata_without_password_omits_chpasswd():
     assert "config: disabled" in u
     assert "chpasswd:" not in u
     assert "ovbuilder-net.sh" in u
+    # No groups passed → no DNF script.
+    assert "ovbuilder-dnf-groups.sh" not in u
+
+
+def test_userdata_embeds_dnf_groups_script():
+    u = build_userdata(
+        "web1",
+        "10.0.1.5",
+        24,
+        password=None,
+        dnf_groups=["Development Tools", "Server"],
+    )
+    assert "ovbuilder-dnf-groups.sh" in u
+    assert "Development Tools" in u
+    assert "Server" in u
+    # Runs after network script in runcmd.
+    net_pos = u.find("/usr/local/sbin/ovbuilder-net.sh")
+    dnf_pos = u.find("/usr/local/sbin/ovbuilder-dnf-groups.sh")
+    assert net_pos != -1 and dnf_pos != -1
+    assert dnf_pos > net_pos
 
 
 def test_userdata_with_password_includes_chpasswd():

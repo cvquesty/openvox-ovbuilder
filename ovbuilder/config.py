@@ -35,6 +35,8 @@ from typing import Dict, List, Optional
 import yaml
 from pydantic import BaseModel, Field
 
+from .packages import DEFAULT_DNF_GROUPS
+
 
 class GoldenImage(BaseModel):
     """
@@ -117,6 +119,10 @@ class OvbuilderConfig(BaseModel):
     golden_images: Dict[str, GoldenImage] = Field(
         default_factory=_default_golden_images
     )
+
+    # --- Clone-time EL package groups (skipped on Ubuntu / no dnf) ----------
+    # Display names from ``dnf group list`` / Anaconda. Empty list disables.
+    dnf_groups: List[str] = Field(default_factory=lambda: list(DEFAULT_DNF_GROUPS))
 
     # --- Legacy ISO shortcuts (iso mode only) -------------------------------
     known_isos: Dict[str, str] = Field(
