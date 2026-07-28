@@ -5,6 +5,7 @@ This document consolidates the key governance rules from ~/Projects/OpenVox/open
 **Standing Rules (to be followed EVERY run/session):**
 
 ## Version Discipline (STRICT)
+
 - Use Semantic Versioning (SemVer 2.0.0) + pre-releases.
   - Stable: MAJOR.MINOR.PATCH (e.g. 0.2.0)
   - Dev: 0.1.0-dev.N, 0.1.0-beta.1, etc.
@@ -16,6 +17,7 @@ This document consolidates the key governance rules from ~/Projects/OpenVox/open
 - User reminder from history: "remember to increment versions on every single push" + "PUSH EVERY TIME".
 
 ## Commit Process (Use the /commit skill)
+
 - **Always use the commit skill** (`/commit`) for changes.
 - The project-scoped commit skill (if present at .grok/skills/commit/SKILL.md) takes precedence; otherwise global.
 - It enforces:
@@ -30,7 +32,9 @@ This document consolidates the key governance rules from ~/Projects/OpenVox/open
 - Never commit secrets.
 
 ## Pre-Commit Checklist (ALWAYS, from global + project)
+
 From ~/.grok/AGENTS.md and openvox-gui:
+
 - CHANGELOG
 - Docs update
 - Version bump (bump script)
@@ -39,15 +43,18 @@ From ~/.grok/AGENTS.md and openvox-gui:
 - Respect all global boundaries (no secrets, etc.).
 
 ## Branching
+
 - Follow openvox-gui: default now `main` (staging removed in gui).
 - For ovbuilder development: use main or feature branches; for major work use alpha-style if following gui pattern.
 - All dev through main for releases.
 
 ## Using /release skill
+
 - When dev train ready, use `/release` to promote to clean stable SemVer, update CHANGELOG, tag, push tag.
 - Prepare manual GitHub Release only then.
 
 ## Other Requirements
+
 - Follow ovox design language for CLI (Typer+Rich, config, etc.).
 - For Terraform parts in ovbuilder: follow any Puppet rules if applicable, but primarily Python/CLI.
 - Infrastructure: use generic example.com etc (already sanitized).
@@ -55,6 +62,7 @@ From ~/.grok/AGENTS.md and openvox-gui:
 - Gather and re-apply these on each major session or when working on ovbuilder/openvox projects.
 
 ## Sources Gathered
+
 - /Users/jsheets/Projects/OpenVox/openvox-gui/AGENTS.md (full version discipline, commit, release, branching, heredoc)
 - /Users/jsheets/Projects/OpenVox/openvox-gui/ovox/README.md (versioning section, install)
 - /Users/jsheets/Projects/OpenVox/openvox-gui/scripts/bump-version.sh (exact propagation logic)

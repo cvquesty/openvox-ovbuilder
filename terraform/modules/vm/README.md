@@ -1,86 +1,124 @@
-# modules/vm — ISO-based VMware VM Provisioner
+# modules/vm — vSphere VM provisioner (clone or ISO)
 
-Reusable Terraform module to rapidly provision new virtual machines in vSphere by booting directly from a datastore-resident OS ISO image.
+Reusable Terraform module used by ovbuilder to create VMs in vSphere.
+
+Two modes:
+
+| `provision_mode` | What happens |
+|------------------|--------------|
+| `clone` | Clone a Packer golden template; inject cloud-init `guestinfo_*` |
+| `iso` | Empty thin disk + attach a datastore ISO for console install |
+
+Most people should run **`ovbuilder build`** instead of calling this module
+directly. This README is for operators who wire Terraform themselves.
 
 ## Why this module?
 
-- Designed for speed: stand up a new VM in one `terraform apply`.
-- Uses **datastore ISOs** (no templates required).
-- Works from a laptop (Mac) or any Linux host that has Terraform.
-- After the OS installer finishes (kickstart or manual), the VM is ready for further configuration (Puppet, Ansible, etc.).
+- One `terraform apply` creates or updates a single VM.
+- Works from macOS, Linux, or Windows as long as Terraform and the
+  HashiCorp vSphere provider can reach vCenter.
+- Thin-provisioned disks; guest waiters disabled for ISO boots.
+- Per-VM state is handled by the ovbuilder CLI (not by this module alone).
 
 ## Usage
 
-### Minimal example (root module)
+### Clone (golden)
 
 ```hcl
 module "new_vm" {
   source = "./modules/vm"
 
-  vm_name       = "itsys-test01"
-  datacenter    = "Main DC"
-  cluster       = "Compute Cluster"
-  vm_datastore  = "vsanDatastore"
-  iso_datastore = "isos"
-  iso_path      = "isos/AlmaLinux-9.4-x86_64-dvd.iso"
+  provision_mode = "clone"
+  vm_name        = "openvox-web03"
+  template_name  = "ovbuilder-almalinux-10"
+  datacenter     = "Main DC"
+  cluster        = "Compute Cluster"
+  vm_datastore   = "vsanDatastore"
+  networks       = ["VM Production"]
 
-  num_cpus    = 4
-  memory_mb   = 8192
+  num_cpus     = 4
+  memory_mb    = 8192
   disk_size_gb = 120
 
-  networks = ["VM Production", "VM iSCSI"]
+  guestinfo_extra_config = {
+    # produced by ovbuilder.cloud_init.guestinfo_extra_config
+  }
 }
 ```
 
-### Full variable-driven example (recommended)
+### ISO (legacy)
 
-See the root `main.tf` + `terraform.tfvars` for a complete pattern.
+```hcl
+module "new_vm" {
+  source = "./modules/vm"
 
-## Important Notes for ISO Boots
+  provision_mode = "iso"
+  vm_name        = "itsys-test01"
+  datacenter     = "Main DC"
+  cluster        = "Compute Cluster"
+  vm_datastore   = "vsanDatastore"
+  iso_datastore  = "isos"
+  iso_path       = "isos/AlmaLinux-10.0-x86_64-dvd.iso"
 
-1. **No guest customization during create** — the VM is booting an installer, not a finished guest.
-2. Set `wait_for_guest_*` to 0 (module does this by default).
-3. Use `boot_delay_ms` (default 10s) so the BIOS/UEFI sees the CD.
-4. The module sets `bios.bootDeviceClasses` + a cdrom attachment + boot delay. This makes the selected ISO get mounted as a virtual CD-ROM and makes the firmware more likely to boot the installer automatically.
-5. After OS install + first boot + VMware Tools install, IPs will start appearing.
-5. You can safely re-run `terraform apply` later to adjust CPU/RAM/disk or add NICs.
+  num_cpus     = 4
+  memory_mb    = 8192
+  disk_size_gb = 120
+
+  networks = ["VM Production"]
+}
+```
+
+Root module wiring lives in `terraform/main.tf` and `terraform/variables.tf`.
+
+## ISO boot notes
+
+1. No guest customization during create — the VM is booting an installer.
+2. `wait_for_guest_*` is 0 (module default).
+3. `boot_delay_ms` (default 10s) helps firmware see the CD.
+4. After OS install, disconnect the ISO (ovbuilder does this) before reboot
+   so the datastore file is not locked.
+5. You can re-run `terraform apply` later to change CPU/RAM/disk or NICs.
 
 ## Common guest_id values
 
-- RHEL / Alma / Rocky / CentOS 9: `rhel9_64Guest`
-- Ubuntu 22.04/24.04: `ubuntu64Guest` or `ubuntu22_64Guest`
-- Use PowerCLI on the vCenter to list all valid IDs for your environment:
+- Alma / RHEL 9–10 style: `rhel9_64Guest` or `other4xLinux64Guest`
+- Ubuntu 22.04 / 24.04: `ubuntu64Guest`
+
+List valid IDs with PowerCLI (Windows or PowerShell Core on UNIX):
 
 ```powershell
 Connect-VIServer vcenter.example.com
-$esxi = Get-VMHost | Select -First 1
+$esxi = Get-VMHost | Select-Object -First 1
 $envBrowser = Get-View $esxi.ExtensionData.Parent.ExtensionData.ConfigManager.EnvironmentBrowser
-$envBrowser.QueryConfigOptionDescriptor() | % { $_.Key }
+$envBrowser.QueryConfigOptionDescriptor() | ForEach-Object { $_.Key }
 ```
 
-## Recommended Workflow
+## Recommended workflows
 
-1. `terraform apply` → VM powers on with ISO attached.
-2. Connect to the VM console in vSphere Client (or use a kickstart-enabled ISO).
-3. Complete OS install.
-4. (Optional) Re-run Terraform to grow disk/CPU or attach more networks.
-5. Run your configuration management (Puppet/OpenVox, Ansible...).
+### Golden (preferred)
 
-## Inputs
+1. Build templates with Packer (`packer/README.md`).
+2. `ovbuilder build` (or Terraform clone mode).
+3. Guest boots; cloud-init applies identity.
+4. Optional OpenVox agent install.
 
-See `variables.tf` for all options and defaults.
+### ISO
 
-## Outputs
+1. `terraform apply` / `ovbuilder build --mode iso`.
+2. Complete OS install in the vSphere console.
+3. Disconnect ISO, reboot into installed OS.
+4. Configure network / agent (ovbuilder SSH helpers or manual).
 
-- `vm_id`
-- `vm_name`
-- `default_ip_address`
-- `iso_attached`
+## Inputs and outputs
 
-## Limitations / Future Work
+See `variables.tf` and `outputs.tf`.
 
-- Currently creates a single primary disk.
-- No built-in kickstart parameter injection (put that in your ISO or use extra_config).
-- For very advanced needs (multiple disks at creation time, advanced SCSI bus, etc.), extend the module or open an issue.
+Notable outputs: `vm_id`, `vm_name`, `default_ip_address`, `iso_attached`,
+`provision_mode`.
 
-Pull requests welcome.
+## Limitations
+
+- Single primary disk at create time.
+- Kickstart content is not injected here (Packer goldens or ISO content).
+- Prefer ovbuilder for per-VM state isolation; a shared root state will
+  treat hostname changes as in-place renames.

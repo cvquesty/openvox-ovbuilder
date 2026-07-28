@@ -1,20 +1,24 @@
 """
-XDG-based configuration for ovbuilder (pydantic model + YAML load/save).
+Platform-aware configuration for ovbuilder (pydantic model + YAML load/save).
 
 =============================================================================
-LOCATIONS (same pattern as ovox CLI)
+LOCATIONS
 =============================================================================
-  Config : $XDG_CONFIG_HOME/ovbuilder/config.yaml
-           default ~/.config/ovbuilder/config.yaml
-  Data   : $XDG_DATA_HOME/ovbuilder/
-           default ~/.local/share/ovbuilder/
-           (per-VM Terraform state lives under data/tfstate/<vm>/)
+  Config : see ``ovbuilder.paths.config_dir``
+           Linux/macOS  ~/.config/ovbuilder/config.yaml
+           Windows      %APPDATA%\\ovbuilder\\config.yaml
+           Override     $XDG_CONFIG_HOME/ovbuilder/
+  Data   : see ``ovbuilder.paths.data_dir``
+           Linux/macOS  ~/.local/share/ovbuilder/
+           Windows      %LOCALAPPDATA%\\ovbuilder\\
+           Override     $XDG_DATA_HOME/ovbuilder/
+           (per-VM Terraform state under data/tfstate/<vm>/)
 
 Environment overrides (selected keys):
   OVBUILDER_TERRAFORM_DIR
   OVBUILDER_VM_DATASTORE
   OVBUILDER_ISO_DATASTORE
-  OVBUILDER_OPENVox_SERVER
+  OVBUILDER_OPENVOX_SERVER
   OVBUILDER_PROVISION_MODE   # golden | iso
 
 =============================================================================
@@ -36,6 +40,8 @@ import yaml
 from pydantic import BaseModel, Field
 
 from .packages import DEFAULT_DNF_GROUPS
+from .paths import config_dir as default_config_dir
+from .paths import data_dir as default_data_dir
 
 
 class GoldenImage(BaseModel):
@@ -144,15 +150,9 @@ class ConfigManager:
     """
 
     def __init__(self, config_dir: Optional[Path] = None):
-        # Resolve XDG paths once; allow test injection via config_dir.
-        self.config_dir = config_dir or (
-            Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-            / "ovbuilder"
-        )
-        self.data_dir = (
-            Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-            / "ovbuilder"
-        )
+        # Resolve platform paths once; allow test injection via config_dir.
+        self.config_dir = config_dir or default_config_dir()
+        self.data_dir = default_data_dir()
         self.config_file = self.config_dir / "config.yaml"
         self._ensure_dirs()
 

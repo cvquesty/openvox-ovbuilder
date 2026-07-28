@@ -53,8 +53,8 @@ def _ensure_golden_password_configured() -> None:
     """
     Fail early in golden mode if no local secrets file / env password.
 
-    Prints a clear panel pointing at ~/.config/ovbuilder/secrets.env so the
-    operator is not surprised mid-interview or after Terraform starts.
+    Prints a clear panel with the resolved secrets path and platform-specific
+    setup steps so the operator is not surprised mid-interview.
     """
     if get_golden_password():
         return
@@ -64,15 +64,10 @@ def _ensure_golden_password_configured() -> None:
             "[bold red]Golden password not configured[/bold red]\n\n"
             "Clones need a guest login password from a [bold]local[/bold] secrets "
             "file (never committed to git).\n\n"
-            f"Create [cyan]{path}[/cyan] if it does not exist:\n\n"
-            f"  mkdir -p {path.parent}\n"
-            f"  chmod 700 {path.parent}\n"
-            f"  echo \"OVBUILDER_GOLDEN_PASSWORD='your-lab-password'\" > {path}\n"
-            f"  chmod 600 {path}\n\n"
-            "Or for this shell only:\n\n"
-            "  export OVBUILDER_GOLDEN_PASSWORD='your-lab-password'\n\n"
-            "Then re-run:  [bold]ovbuilder build[/bold]\n\n"
-            "[dim]See docs/SECRETS.md[/dim]",
+            f"Expected file: [cyan]{path}[/cyan]\n\n"
+            "See the printed commands below (UNIX and Windows), then re-run:\n"
+            "  [bold]ovbuilder build[/bold]\n\n"
+            "[dim]Full guide: docs/SECRETS.md[/dim]",
             title="Missing secrets.env",
             border_style="red",
         )

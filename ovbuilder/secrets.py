@@ -4,10 +4,10 @@ Local secrets for ovbuilder — never committed, never logged.
 Resolution order for the golden / clone login password
 ------------------------------------------------------
 1. Environment: ``OVBUILDER_GOLDEN_PASSWORD``
-2. Local env-file: ``$XDG_CONFIG_HOME/ovbuilder/secrets.env``
-   (default ``~/.config/ovbuilder/secrets.env``, mode 0600)
-3. Local YAML: ``$XDG_CONFIG_HOME/ovbuilder/secrets.yaml``
-   key ``golden_password``
+2. Local env-file: ``<config_dir>/secrets.env`` (mode 0600 when the OS allows)
+3. Local YAML: ``<config_dir>/secrets.yaml`` key ``golden_password``
+
+``config_dir`` is platform-aware (see ``ovbuilder.paths.config_dir``).
 
 vSphere credentials stay interactive / CLI flags / env
 (``VSPHERE_PASSWORD``, ``TF_VAR_vsphere_password``) — not stored in the
@@ -24,16 +24,15 @@ from typing import Optional
 
 import yaml
 
+from .paths import config_dir, is_windows
+
 # Public env name — operators export this in CI or shell.
 ENV_GOLDEN_PASSWORD = "OVBUILDER_GOLDEN_PASSWORD"
 
 
 def secrets_dir() -> Path:
-    """XDG config dir for ovbuilder (same as ConfigManager)."""
-    return (
-        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-        / "ovbuilder"
-    )
+    """Config dir for secrets (same tree as ConfigManager)."""
+    return config_dir()
 
 
 def secrets_env_path() -> Path:
@@ -104,26 +103,41 @@ def golden_password_setup_help() -> str:
     """
     Operator-facing instructions when the golden password is missing.
 
-    Always points at ``~/.config/ovbuilder/secrets.env`` (resolved path).
+    Includes both UNIX shell and Windows PowerShell snippets.
     """
     env_path = secrets_env_path()
+    directory = secrets_dir()
+    unix = (
+        f"  mkdir -p {directory}\n"
+        f"  chmod 700 {directory}\n"
+        f"  printf \"%s\\n\" \"{ENV_GOLDEN_PASSWORD}='your-lab-password'\" > {env_path}\n"
+        f"  chmod 600 {env_path}\n"
+        "\n"
+        "  # or this shell only:\n"
+        f"  export {ENV_GOLDEN_PASSWORD}='your-lab-password'\n"
+    )
+    windows = (
+        f"  New-Item -ItemType Directory -Force -Path \"{directory}\"\n"
+        f"  Set-Content -Path \"{env_path}\" -Value \"{ENV_GOLDEN_PASSWORD}=your-lab-password\"\n"
+        "\n"
+        "  # or this session only:\n"
+        f"  $env:{ENV_GOLDEN_PASSWORD} = 'your-lab-password'\n"
+    )
+    primary = windows if is_windows() else unix
+    secondary_label = "UNIX / macOS / Linux / Git Bash / WSL" if is_windows() else "Windows PowerShell"
+    secondary = unix if is_windows() else windows
     return (
         "Golden guest password is not configured.\n"
         "\n"
         "ovbuilder will not bake a default password into git or the install.\n"
-        "Create a local secrets file (never commit it):\n"
+        "Create a local secrets file (never commit it).\n"
         "\n"
-        f"  mkdir -p {secrets_dir()}\n"
-        f"  chmod 700 {secrets_dir()}\n"
-        f"  cat > {env_path} <<'EOF'\n"
-        f"  {ENV_GOLDEN_PASSWORD}='your-lab-password'\n"
-        f"  EOF\n"
-        f"  chmod 600 {env_path}\n"
+        f"Resolved secrets path: {env_path}\n"
         "\n"
-        "Or export for this shell only:\n"
-        "\n"
-        f"  export {ENV_GOLDEN_PASSWORD}='your-lab-password'\n"
-        "\n"
+        "This platform:\n"
+        f"{primary}\n"
+        f"{secondary_label}:\n"
+        f"{secondary}\n"
         "Then re-run:  ovbuilder build\n"
         "\n"
         "Details: docs/SECRETS.md"

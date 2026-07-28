@@ -1,0 +1,24 @@
+{
+  "config": {
+    "default": true,
+    // Badge rows, CHANGELOG history, and AGENTS tables regularly exceed 80/120.
+    "MD013": false,
+    // CHANGELOG repeats ### Fixed / ### Added across releases.
+    "MD024": false,
+    // README badge banner uses a centered HTML wrapper.
+    "MD033": false,
+    "MD041": false,
+    // Compact tables are easier to maintain than pipe-aligned ones.
+    "MD060": false
+  },
+  "globs": [
+    "**/*.md"
+  ],
+  "ignores": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/build/**",
+    "**/.terraform/**",
+    "**/terraform/.terraform/**"
+  ]
+}
