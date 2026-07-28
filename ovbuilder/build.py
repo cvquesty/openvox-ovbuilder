@@ -41,7 +41,13 @@ from rich.table import Table
 from . import vsphere
 from .cloud_init import guestinfo_extra_config
 from .config import OvbuilderConfig, get_config_manager
-from .network import PrefixParseError, parse_cidr_prefix, prefix_to_netmask
+from .network import (
+    PrefixParseError,
+    is_plausible_dns,
+    normalize_dns_servers,
+    parse_cidr_prefix,
+    prefix_to_netmask,
+)
 from .secrets import get_golden_password, golden_password_setup_help, secrets_env_path
 from .ssh import run_post_install_steps
 from .terraform import run_terraform_apply
@@ -225,7 +231,14 @@ def build(
     gateway: Optional[str] = typer.Option(
         None, "--gateway", help="Default gateway IP"
     ),
-    dns: Optional[str] = typer.Option(None, "--dns", help="DNS server IP"),
+    dns: Optional[List[str]] = typer.Option(
+        None,
+        "--dns",
+        help=(
+            "DNS server IP or hostname. Repeat the flag or comma-separate. "
+            "Interactive: enter one per prompt; empty line finishes."
+        ),
+    ),
     skip_dnf_groups: bool = typer.Option(
         False,
         "--skip-dnf-groups",
@@ -484,7 +497,37 @@ def build(
             except PrefixParseError as exc:
                 console.print(f"[red]{exc}[/red]")
         gateway = Prompt.ask("Default gateway IP (optional)", default="") or None
-        dns = Prompt.ask("DNS server IP (optional)", default="") or None
+
+        console.print(
+            "[dim]DNS servers (optional). Enter one IP or hostname per prompt. "
+            "Leave blank and press Enter when done.[/dim]"
+        )
+        dns_acc: List[str] = []
+        while True:
+            idx = len(dns_acc) + 1
+            raw_dns = Prompt.ask(
+                f"DNS server #{idx} (empty to finish)",
+                default="",
+            )
+            value = (raw_dns or "").strip()
+            if not value:
+                break
+            if not is_plausible_dns(value):
+                console.print(
+                    f"[red]Invalid DNS server {value!r}. "
+                    "Use an IPv4/IPv6 address or hostname.[/red]"
+                )
+                continue
+            if value in dns_acc:
+                console.print(f"[yellow]Already added {value}; skipping.[/yellow]")
+                continue
+            dns_acc.append(value)
+            console.print(f"[dim]  + {value}[/dim]")
+        dns = dns_acc
+        if dns:
+            console.print(f"[dim]DNS order: {', '.join(dns)}[/dim]")
+        else:
+            console.print("[dim]No DNS servers entered.[/dim]")
 
         cpus = int(Prompt.ask("CPUs", default=str(cfg.default_cpus)))
         memory = int(
@@ -551,6 +594,17 @@ def build(
     cpus = _coerce_sizing(cpus, cfg.default_cpus)
     memory = _coerce_sizing(memory, cfg.default_memory_gb)
     disk = _coerce_sizing(disk, cfg.default_disk_gb)
+
+    # Normalize DNS from interactive list or --dns flags / comma lists.
+    dns = normalize_dns_servers(dns)
+    bad_dns = [d for d in dns if not is_plausible_dns(d)]
+    if bad_dns:
+        console.print(
+            f"[red]Invalid --dns value(s): {', '.join(bad_dns)}[/red]"
+        )
+        raise typer.Exit(1)
+    if dns:
+        console.print(f"[dim]DNS servers: {', '.join(dns)}[/dim]")
 
     # Clone-time DNF groups (EL only; skipped on Ubuntu / when flag set).
     dnf_groups = [] if skip_dnf_groups else list(cfg.dnf_groups or [])

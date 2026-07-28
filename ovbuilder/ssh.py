@@ -23,12 +23,13 @@ SECURITY
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Optional, Sequence, Union
 
 import paramiko
 from rich.console import Console
 from rich.panel import Panel
 
+from .network import normalize_dns_servers
 from .packages import build_dnf_groupinstall_script, sanitize_dnf_groups
 
 console = Console()
@@ -55,7 +56,7 @@ def _configure_network(
     ip: str,
     prefix: int = 24,
     gateway: Optional[str] = None,
-    dns: Optional[str] = None,
+    dns: Optional[Union[str, Sequence[str]]] = None,
 ) -> None:
     """
     Best-effort static network configuration inside the guest.
@@ -82,11 +83,11 @@ def _configure_network(
 
     # Optional gateway/DNS — omit nmcli keys when unset.
     gw = (gateway or "").strip()
-    dns1 = (dns or "").strip()
+    dns_list = normalize_dns_servers(dns)
+    dns_nm = " ".join(_require_safe("dns", d) for d in dns_list)
+    dns_csv = ", ".join(dns_list)
     if gw:
         gw = _require_safe("gateway", gw)
-    if dns1:
-        dns1 = _require_safe("dns", dns1)
 
     # --- RHEL-family (NetworkManager) ---------------------------------------
     nmcli = (
@@ -96,8 +97,8 @@ def _configure_network(
     )
     if gw:
         nmcli += f" ipv4.gateway {gw}"
-    if dns1:
-        nmcli += f" ipv4.dns {dns1}"
+    if dns_nm:
+        nmcli += f" ipv4.dns {dns_nm}"
     nmcli += " || true"
     commands.append(nmcli)
     commands.append("nmcli con up 'System eth0' || true")
@@ -112,10 +113,10 @@ def _configure_network(
             f"          via: {gw}\n"
         )
     dns_yaml = ""
-    if dns1:
+    if dns_csv:
         dns_yaml = (
             f"      nameservers:\n"
-            f"        addresses: [{dns1}]\n"
+            f"        addresses: [{dns_csv}]\n"
         )
     netplan = (
         "network:\n"
@@ -185,7 +186,7 @@ def run_post_install_steps(
     hostname: str,
     prefix: int = 24,
     gateway: Optional[str] = None,
-    dns: Optional[str] = None,
+    dns: Optional[Union[str, Sequence[str]]] = None,
     openvox_server: str = "openvox.example.com",
     configure_network: bool = True,
     dnf_groups: Optional[list] = None,

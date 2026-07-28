@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from ovbuilder.network import PrefixParseError, parse_cidr_prefix, prefix_to_netmask
+from ovbuilder.network import (
+    PrefixParseError,
+    is_plausible_dns,
+    normalize_dns_servers,
+    parse_cidr_prefix,
+    prefix_to_netmask,
+)
 
 
 @pytest.mark.parametrize(
@@ -62,6 +68,25 @@ def test_prefix_to_netmask_examples():
     assert prefix_to_netmask(24) == "255.255.255.0"
     assert prefix_to_netmask(25) == "255.255.255.128"
     assert prefix_to_netmask(16) == "255.255.0.0"
+
+
+def test_normalize_dns_servers_splits_and_dedupes():
+    assert normalize_dns_servers(None) == []
+    assert normalize_dns_servers("8.8.8.8") == ["8.8.8.8"]
+    assert normalize_dns_servers("8.8.8.8,1.1.1.1") == ["8.8.8.8", "1.1.1.1"]
+    assert normalize_dns_servers(["8.8.8.8", "1.1.1.1,9.9.9.9"]) == [
+        "8.8.8.8",
+        "1.1.1.1",
+        "9.9.9.9",
+    ]
+    assert normalize_dns_servers(["8.8.8.8", "8.8.8.8"]) == ["8.8.8.8"]
+
+
+def test_is_plausible_dns():
+    assert is_plausible_dns("8.8.8.8")
+    assert is_plausible_dns("dns.example.com")
+    assert not is_plausible_dns("")
+    assert not is_plausible_dns("evil;rm -rf /")
 
 
 def test_round_trip_masks():

@@ -28,6 +28,19 @@ def test_network_script_has_netplan_and_nmcli_paths():
     assert "99-ovbuilder.yaml" in s
     assert "path=nmcli" in s
     assert 'connection.id "$IFACE"' in s
+    assert "10.0.1.2" in s
+
+
+def test_network_script_multiple_dns():
+    s = _network_configure_script(
+        "10.0.1.5",
+        24,
+        gateway="10.0.1.1",
+        dns=["8.8.8.8", "1.1.1.1"],
+        domain="lab.local",
+    )
+    assert "8.8.8.8, 1.1.1.1" in s  # netplan CSV
+    assert "8.8.8.8 1.1.1.1" in s  # nmcli space-separated
 
 
 def test_userdata_without_password_omits_chpasswd():

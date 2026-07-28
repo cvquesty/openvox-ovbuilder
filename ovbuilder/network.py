@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Union
+from typing import Iterable, List, Optional, Sequence, Union
 
 
 class PrefixParseError(ValueError):
@@ -128,3 +128,57 @@ def parse_cidr_prefix(raw: Union[str, int, None]) -> int:
     if not 0 <= prefix <= 32:
         raise PrefixParseError(f"prefix must be 0–32, got {prefix}")
     return prefix
+
+
+# Hostnames / IPs safe to embed in guest shell + netplan / nmcli.
+_DNS_TOKEN = re.compile(
+    r"^(?:"
+    r"(?:\d{1,3}\.){3}\d{1,3}"  # IPv4
+    r"|(?:[A-Fa-f0-9:]+)"  # rough IPv6
+    r"|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9-]{1,63})*)"
+    r")$"
+)
+
+
+def is_plausible_dns(value: str) -> bool:
+    """True if value looks like an IPv4/IPv6 address or DNS hostname."""
+    s = (value or "").strip()
+    if not s or not _DNS_TOKEN.match(s):
+        return False
+    # Prefer stdlib for IPv4/IPv6; hostnames already matched above.
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return "." in s or s.isalnum() or "-" in s
+
+
+def normalize_dns_servers(
+    dns: Optional[Union[str, Sequence[str]]] = None,
+) -> List[str]:
+    """
+    Normalize operator DNS input to an ordered, de-duplicated list.
+
+    Accepts ``None``, a single string (optionally comma/space separated),
+    or a sequence of strings (each may itself be comma-separated).
+    """
+    if dns is None:
+        return []
+    chunks: Iterable[str]
+    if isinstance(dns, str):
+        chunks = [dns]
+    else:
+        chunks = dns
+
+    out: List[str] = []
+    seen = set()
+    for chunk in chunks:
+        if chunk is None:
+            continue
+        for part in re.split(r"[\s,;]+", str(chunk).strip()):
+            token = part.strip()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            out.append(token)
+    return out

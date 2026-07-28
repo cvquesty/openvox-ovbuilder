@@ -4,7 +4,7 @@
 
 **Build OpenVox-ready VMware VMs from Packer golden templates (or a legacy ISO) — without memorizing Terraform every time.**
 
-[![Version](https://img.shields.io/badge/version-0.97--beta16-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.97--beta17-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Terraform](https://img.shields.io/badge/Terraform-1.5%2B-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)](https://terraform.io)
@@ -198,6 +198,7 @@ ovbuilder build --yes \
   --prefix 24 \
   --gateway 10.0.42.1 \
   --dns 10.0.42.10 \
+  --dns 1.1.1.1 \
   --cpus 4 --memory 8 --disk 120 \
   --vsphere-server vcenter.example.com \
   --vsphere-user administrator@vsphere.local \
@@ -227,7 +228,8 @@ ovbuilder build --yes --mode iso \
 | `--iso path/to.iso` | Datastore-relative ISO path (ISO mode) |
 | `--hostname` / `--ip` | Guest identity |
 | `--prefix` / `--cidr` | Subnet as `24`, `/19`, or `255.255.224.0` |
-| `--gateway` / `--dns` | Optional routing and DNS |
+| `--gateway` | Optional default gateway |
+| `--dns` | DNS server (repeat or comma-separate; interactive: one per prompt until empty) |
 | `--cpus` / `--memory` / `--disk` | Size (memory in **GB**) |
 | `--skip-dnf-groups` | Do not install configured EL package groups |
 | `--yes` / `-y` | No prompts (requires hostname, IP, and OS or ISO) |
@@ -353,7 +355,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta16` |
+| ovbuilder CLI | `0.97-beta17` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |

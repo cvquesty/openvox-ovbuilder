@@ -36,8 +36,9 @@ from __future__ import annotations
 
 import base64
 import shlex
-from typing import Optional
+from typing import Optional, Sequence, Union
 
+from .network import normalize_dns_servers
 from .packages import build_dnf_groupinstall_script, sanitize_dnf_groups
 from .secrets import get_golden_password, require_golden_password
 
@@ -65,14 +66,17 @@ def _network_configure_script(
     ip: str,
     prefix: int,
     gateway: Optional[str] = None,
-    dns: Optional[str] = None,
+    dns: Optional[Union[str, Sequence[str]]] = None,
     domain: str = "",
 ) -> str:
     """
     Bash body (no shebang): configure primary e* NIC via netplan or nmcli.
     """
     gw = (gateway or "").strip()
-    dns1 = (dns or "").strip()
+    dns_list = normalize_dns_servers(dns)
+    # Netplan wants comma list; nmcli wants space-separated DNS values.
+    dns_csv = ", ".join(dns_list)
+    dns_nm = " ".join(dns_list)
     dom = (domain or "").strip()
     ip_cidr = f"{ip}/{prefix}"
 
@@ -85,10 +89,10 @@ def _network_configure_script(
             f"          via: {gw}\n"
         )
     nameservers_block = ""
-    if dns1:
+    if dns_csv:
         nameservers_block = (
             "      nameservers:\n"
-            f"        addresses: [{dns1}]\n"
+            f"        addresses: [{dns_csv}]\n"
         )
         if dom:
             nameservers_block += f"        search: [{dom}]\n"
@@ -99,8 +103,8 @@ def _network_configure_script(
         extra_mod.append(f"ipv4.gateway {shlex.quote(gw)}")
     else:
         extra_mod.append("ipv4.gateway ''")
-    if dns1:
-        extra_mod.append(f"ipv4.dns {shlex.quote(dns1)}")
+    if dns_nm:
+        extra_mod.append(f"ipv4.dns {shlex.quote(dns_nm)}")
     else:
         extra_mod.append("ipv4.dns ''")
     if dom:
@@ -212,7 +216,7 @@ def _nmcli_configure_script(
     ip: str,
     prefix: int,
     gateway: Optional[str] = None,
-    dns: Optional[str] = None,
+    dns: Optional[Union[str, Sequence[str]]] = None,
     domain: str = "",
 ) -> str:
     return _network_configure_script(
@@ -225,7 +229,7 @@ def build_userdata(
     ip: str,
     prefix: int,
     gateway: Optional[str] = None,
-    dns: Optional[str] = None,
+    dns: Optional[Union[str, Sequence[str]]] = None,
     domain: str = "",
     default_user: str = "ubuntu",
     password: Optional[str] = None,
@@ -327,7 +331,7 @@ def guestinfo_extra_config(
     ip: str,
     prefix: int,
     gateway: Optional[str] = None,
-    dns: Optional[str] = None,
+    dns: Optional[Union[str, Sequence[str]]] = None,
     domain: str = "",
     default_user: str = "ubuntu",
     password: Optional[str] = None,
