@@ -339,6 +339,23 @@ known_isos:
 ovbuilder config
 ```
 
+## OpenVox site (compiler VIP)
+
+`--location ATLC` or `--location PDXC` (or the interview Location prompt)
+selects the **local** catalog compiler:
+
+| Location | `server=` | GUI package repo | `ca_server=` |
+|----------|-----------|------------------|--------------|
+| ATLC | `ovcompilers.atlc-it.corp.int-x.ai` | `openvox.atlc-it.corp.int-x.ai:4567` | `ovca.corp.int-x.ai` |
+| PDXC | `ovcompilers.pdxc-it.corp.int-x.ai` | `openvox.pdxc-it.corp.int-x.ai:4567` | `ovca.corp.int-x.ai` |
+
+If you omit `--location`, ovbuilder infers ATLC/PDXC from hostname, domain,
+or vSphere network name. Clone-time cloud-init then installs the agent via
+the GUI `install.bash` (`--server`, `--ca-server`, `--pkg-repo-url`).
+
+HTTP proxy (optional) comes from `OVBUILDER_HTTP_PROXY` / `secrets.env` —
+see [docs/SECRETS.md](docs/SECRETS.md). Never commit the proxy password.
+
 ## DNF groups (AlmaLinux / RHEL family)
 
 Golden and ISO guests often start as **Minimal** / `@core`. By default ovbuilder installs a set of DNF groups after the network is configured:
@@ -355,7 +372,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta17` |
+| ovbuilder CLI | `0.97-beta18` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |

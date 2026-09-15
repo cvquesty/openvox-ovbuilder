@@ -11,6 +11,7 @@ This guide covers **macOS, Linux, and Windows**.
 | Secret | Local only (not in git) | Used by |
 |--------|-------------------------|---------|
 | Golden / clone login password | `secrets.env` or `OVBUILDER_GOLDEN_PASSWORD` | `ovbuilder build` (cloud-init guestinfo) |
+| HTTP/HTTPS proxy (with auth) | `secrets.env` `OVBUILDER_HTTP_PROXY` | Clone-time apt/dnf/profile.d |
 | Packer vCenter + golden password | `packer/variables.auto.pkrvars.hcl` (gitignored) | `packer build` |
 | vSphere password for ovbuilder | CLI prompt, `--vsphere-password`, or `VSPHERE_PASSWORD` / `TF_VAR_vsphere_password` | Terraform |
 
@@ -70,6 +71,21 @@ golden_password: choose-a-strong-lab-password
 
 If the password is unset, golden clone **stops early** with setup instructions
 instead of using a hard-coded default.
+
+## HTTP proxy (clone time)
+
+Do **not** put the proxy password in git or Packer seeds. Add it to the
+same `secrets.env`:
+
+```bash
+printf "%s\n" "OVBUILDER_HTTP_PROXY='http://USER:PASS@httpproxy.example.com:3128'" >> ~/.config/ovbuilder/secrets.env
+chmod 600 ~/.config/ovbuilder/secrets.env
+```
+
+cloud-init writes `/etc/profile.d/ovbuilder-proxy.sh`, `/etc/environment`,
+apt `01ovbuilder-proxy`, and dnf `dnf.conf.d/ovbuilder-proxy.conf`.
+`no_proxy` always includes the OpenVox estate plus this clone's FQDN and
+IP so the CA, compilers, and GUI never go through Squid.
 
 ## Packer golden builds
 

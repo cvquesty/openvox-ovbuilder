@@ -5,6 +5,20 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta18] - 2026-09-15
+
+### Added
+
+- **Location-aware OpenVox agent install** — `--location ATLC|PDXC`
+  (or infer from hostname/domain/network) selects the local compiler
+  VIP and GUI package repo. `ca_server` stays `ovca.corp.int-x.ai`.
+  Clone-time cloud-init runs the GUI `install.bash` with
+  `--server` / `--ca-server` / `--pkg-repo-url`.
+- **Clone-time HTTP proxy** from `OVBUILDER_HTTP_PROXY` / `secrets.env`
+  (never git). Writes profile.d, `/etc/environment`, apt, and dnf
+  proxy snippets. `no_proxy` includes the estate plus this VM's FQDN
+  and IP.
+
 ## [0.97-beta17] - 2026-07-28
 
 ### Changed

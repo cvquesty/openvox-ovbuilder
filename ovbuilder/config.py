@@ -203,7 +203,9 @@ class ConfigManager:
             cfg.vm_datastore = ds
         if ids := os.environ.get("OVBUILDER_ISO_DATASTORE"):
             cfg.iso_datastore = ids
-        if srv := os.environ.get("OVBUILDER_OPENVox_SERVER"):
+        if srv := os.environ.get("OVBUILDER_OPENVOX_SERVER") or os.environ.get(
+            "OVBUILDER_OPENVox_SERVER"
+        ):
             cfg.openvox_server = srv
         if mode := os.environ.get("OVBUILDER_PROVISION_MODE"):
             cfg.provision_mode = mode.strip().lower()

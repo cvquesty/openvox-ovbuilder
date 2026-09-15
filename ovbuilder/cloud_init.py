@@ -39,8 +39,14 @@ import shlex
 from typing import Optional, Sequence, Union
 
 from .network import normalize_dns_servers
+from .openvox_site import (
+    OpenVoxSite,
+    agent_install_command,
+    no_proxy_csv,
+    parse_proxy_url,
+)
 from .packages import build_dnf_groupinstall_script, sanitize_dnf_groups
-from .secrets import get_golden_password, require_golden_password
+from .secrets import get_golden_password, get_http_proxy, require_golden_password
 
 
 def _b64(s: str) -> str:
@@ -224,6 +230,84 @@ def _nmcli_configure_script(
     )
 
 
+def build_proxy_apply_script(
+    proxy_url: str,
+    no_proxy: str,
+) -> str:
+    """
+    Bash that writes apt/dnf/environment/profile.d proxy settings.
+
+    ``proxy_url`` is written only into root-owned files on the guest.
+    """
+    parsed = parse_proxy_url(proxy_url)
+    url = parsed.get("url") or proxy_url
+    host = parsed.get("host") or ""
+    port = parsed.get("port") or 3128
+    user = parsed.get("username") or ""
+    pw = parsed.get("password") or ""
+    url_q = shlex.quote(url)
+    np_q = shlex.quote(no_proxy)
+    user_q = shlex.quote(user)
+    pw_q = shlex.quote(pw)
+    host_q = shlex.quote(str(host))
+    port_q = shlex.quote(str(port))
+    dnf_user = f"echo proxy_username={user_q}" if user else "true"
+    dnf_pw = f"echo proxy_password={pw_q}" if pw else "true"
+    return f"""#!/bin/bash
+set -euo pipefail
+umask 077
+mkdir -p /etc/profile.d /etc/apt/apt.conf.d /etc/dnf
+printf '%s\\n' \\
+  'export http_proxy={url_q}' \\
+  'export https_proxy={url_q}' \\
+  'export HTTP_PROXY={url_q}' \\
+  'export HTTPS_PROXY={url_q}' \\
+  'export no_proxy={np_q}' \\
+  'export NO_PROXY={np_q}' \\
+  > /etc/profile.d/ovbuilder-proxy.sh
+chmod 0644 /etc/profile.d/ovbuilder-proxy.sh
+touch /etc/environment
+for key in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; do
+  grep -q "^${{key}}=" /etc/environment && sed -i "/^${{key}}=/d" /etc/environment || true
+done
+printf '%s\\n' \\
+  'http_proxy={url_q}' \\
+  'https_proxy={url_q}' \\
+  'HTTP_PROXY={url_q}' \\
+  'HTTPS_PROXY={url_q}' \\
+  'no_proxy={np_q}' \\
+  'NO_PROXY={np_q}' \\
+  >> /etc/environment
+if [ -d /etc/apt/apt.conf.d ]; then
+  printf '%s\\n' \\
+    'Acquire::http::Proxy "{url}";' \\
+    'Acquire::https::Proxy "{url}";' \\
+    > /etc/apt/apt.conf.d/01ovbuilder-proxy
+  chmod 0644 /etc/apt/apt.conf.d/01ovbuilder-proxy
+fi
+if command -v dnf >/dev/null 2>&1 || [ -f /etc/dnf/dnf.conf ]; then
+  mkdir -p /etc/dnf/dnf.conf.d
+  {{
+    echo '[main]'
+    echo proxy=http://{host_q}:{port_q}
+    {dnf_user}
+    {dnf_pw}
+  }} > /etc/dnf/dnf.conf.d/ovbuilder-proxy.conf
+  chmod 0600 /etc/dnf/dnf.conf.d/ovbuilder-proxy.conf
+fi
+"""
+
+
+def build_agent_install_script(site: OpenVoxSite) -> str:
+    """Bash wrapper around the GUI install.bash clustered flags."""
+    cmd = agent_install_command(site)
+    return f"""#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+{cmd}
+"""
+
+
 def build_userdata(
     hostname: str,
     ip: str,
@@ -234,6 +318,8 @@ def build_userdata(
     default_user: str = "ubuntu",
     password: Optional[str] = None,
     dnf_groups: Optional[list] = None,
+    http_proxy: Optional[str] = None,
+    openvox_site: Optional[OpenVoxSite] = None,
 ) -> str:
     """
     Build cloud-init **user-data**: hostname, optional passwords, net apply.
@@ -301,6 +387,36 @@ def build_userdata(
             "    content: |",
             dnf_block,
         ]
+    extras = [fqdn, ip]
+    proxy_url = (http_proxy or "").strip()
+    site = openvox_site
+    if proxy_url:
+        np = no_proxy_csv(extra=extras, site=site)
+        proxy_script = build_proxy_apply_script(proxy_url, np)
+        proxy_block = "\n".join(
+            f"      {line}" if line else "      "
+            for line in proxy_script.splitlines()
+        )
+        lines += [
+            "  - path: /usr/local/sbin/ovbuilder-proxy.sh",
+            "    permissions: '0755'",
+            "    owner: root:root",
+            "    content: |",
+            proxy_block,
+        ]
+    if site:
+        agent_script = build_agent_install_script(site)
+        agent_block = "\n".join(
+            f"      {line}" if line else "      "
+            for line in agent_script.splitlines()
+        )
+        lines += [
+            "  - path: /usr/local/sbin/ovbuilder-openvox-agent.sh",
+            "    permissions: '0755'",
+            "    owner: root:root",
+            "    content: |",
+            agent_block,
+        ]
     lines += [
         "runcmd:",
         f"  - [hostnamectl, set-hostname, {hostname}]",
@@ -316,9 +432,13 @@ def build_userdata(
     lines += [
         "  - [/usr/local/sbin/ovbuilder-net.sh]",
     ]
+    if proxy_url:
+        lines.append("  - [/usr/local/sbin/ovbuilder-proxy.sh]")
     if dnf_block:
-        # After network is up so base/appstream repos resolve.
+        # After network + proxy so base/appstream repos resolve.
         lines.append("  - [/usr/local/sbin/ovbuilder-dnf-groups.sh]")
+    if site:
+        lines.append("  - [/usr/local/sbin/ovbuilder-openvox-agent.sh]")
     lines += [
         f'final_message: "ovbuilder cloud-init finished for {hostname}"',
         "",
@@ -336,6 +456,8 @@ def guestinfo_extra_config(
     default_user: str = "ubuntu",
     password: Optional[str] = None,
     dnf_groups: Optional[list] = None,
+    http_proxy: Optional[str] = None,
+    openvox_site: Optional[OpenVoxSite] = None,
     *,
     require_password: bool = True,
 ) -> dict:
@@ -348,6 +470,7 @@ def guestinfo_extra_config(
     pw = (password or "").strip() or get_golden_password()
     if require_password and not pw:
         pw = require_golden_password("golden clone guestinfo")
+    proxy = (http_proxy or "").strip() or (get_http_proxy() or "")
     meta = build_metadata(hostname, domain=domain)
     user = build_userdata(
         hostname,
@@ -359,6 +482,8 @@ def guestinfo_extra_config(
         default_user=default_user,
         password=pw,
         dnf_groups=dnf_groups,
+        http_proxy=proxy or None,
+        openvox_site=openvox_site,
     )
     return {
         "guestinfo.metadata": _b64(meta),

@@ -28,6 +28,7 @@ from .paths import config_dir, is_windows
 
 # Public env name — operators export this in CI or shell.
 ENV_GOLDEN_PASSWORD = "OVBUILDER_GOLDEN_PASSWORD"
+ENV_HTTP_PROXY = "OVBUILDER_HTTP_PROXY"
 
 
 def secrets_dir() -> Path:
@@ -142,6 +143,37 @@ def golden_password_setup_help() -> str:
         "\n"
         "Details: docs/SECRETS.md"
     )
+
+
+def get_http_proxy() -> Optional[str]:
+    """
+    Return the HTTP/HTTPS proxy URL, or None.
+
+    Resolution: ``OVBUILDER_HTTP_PROXY`` env, then secrets.env
+    (``OVBUILDER_HTTP_PROXY`` / ``HTTP_PROXY`` / ``http_proxy``),
+    then secrets.yaml ``http_proxy``. Never logged.
+    """
+    env = os.environ.get(ENV_HTTP_PROXY, "").strip()
+    if env:
+        return env
+    env_file = secrets_env_path()
+    if env_file.is_file():
+        parsed = _parse_env_file(env_file)
+        for key in (ENV_HTTP_PROXY, "HTTP_PROXY", "http_proxy"):
+            if parsed.get(key, "").strip():
+                return parsed[key].strip()
+    yml = secrets_yaml_path()
+    if yml.is_file():
+        try:
+            raw = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            raw = {}
+        if isinstance(raw, dict):
+            for key in ("http_proxy", "HTTP_PROXY", ENV_HTTP_PROXY):
+                val = raw.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+    return None
 
 
 def require_golden_password(context: str = "golden clone") -> str:

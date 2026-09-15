@@ -11,6 +11,7 @@ from ovbuilder.cloud_init import (
     guestinfo_extra_config,
     _network_configure_script,
 )
+from ovbuilder.openvox_site import DEFAULT_SITES
 
 
 def test_metadata_is_identity_only():
@@ -70,6 +71,28 @@ def test_userdata_embeds_dnf_groups_script():
     dnf_pos = u.find("/usr/local/sbin/ovbuilder-dnf-groups.sh")
     assert net_pos != -1 and dnf_pos != -1
     assert dnf_pos > net_pos
+
+
+def test_userdata_embeds_proxy_and_agent_after_network():
+    u = build_userdata(
+        "web1",
+        "10.0.1.5",
+        24,
+        domain="atlc-it.corp.int-x.ai",
+        password=None,
+        http_proxy="http://user:dummy@proxy.example.com:3128",
+        openvox_site=DEFAULT_SITES["ATLC"],
+    )
+    assert "ovbuilder-proxy.sh" in u
+    assert "ovbuilder-openvox-agent.sh" in u
+    assert "dummy" in u  # guest receives proxy; never committed as real secret
+    assert "ovcompilers.atlc-it.corp.int-x.ai" in u
+    assert "--ca-server ovca.corp.int-x.ai" in u
+    net = u.find("/usr/local/sbin/ovbuilder-net.sh")
+    proxy = u.rfind("/usr/local/sbin/ovbuilder-proxy.sh")
+    agent = u.rfind("/usr/local/sbin/ovbuilder-openvox-agent.sh")
+    assert net != -1 and proxy != -1 and agent != -1
+    assert net < proxy < agent
 
 
 def test_userdata_with_password_includes_chpasswd():

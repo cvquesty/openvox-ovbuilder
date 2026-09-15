@@ -30,6 +30,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .network import normalize_dns_servers
+from .openvox_site import OpenVoxSite, agent_install_command
 from .packages import build_dnf_groupinstall_script, sanitize_dnf_groups
 
 console = Console()
@@ -188,6 +189,7 @@ def run_post_install_steps(
     gateway: Optional[str] = None,
     dns: Optional[Union[str, Sequence[str]]] = None,
     openvox_server: str = "openvox.example.com",
+    openvox_site: Optional[OpenVoxSite] = None,
     configure_network: bool = True,
     dnf_groups: Optional[list] = None,
 ) -> bool:
@@ -228,12 +230,15 @@ def run_post_install_steps(
         if dnf_groups:
             _install_dnf_groups(client, dnf_groups)
 
-        # Official agent install entrypoint on OpenVox server :8140/packages
-        openvox_server = _require_safe("openvox_server", openvox_server)
-        cmd = (
-            f"curl -k --noproxy {openvox_server} "
-            f"https://{openvox_server}:8140/packages/install.bash | sudo bash"
-        )
+        if openvox_site:
+            cmd = agent_install_command(openvox_site)
+        else:
+            # Legacy single-host :8140 path when no site was resolved.
+            openvox_server = _require_safe("openvox_server", openvox_server)
+            cmd = (
+                f"curl -k --noproxy {openvox_server} "
+                f"https://{openvox_server}:8140/packages/install.bash | sudo bash"
+            )
 
         console.print(Panel(f"[bold]Running:[/bold] {cmd}", title="OpenVox Bootstrap"))
 

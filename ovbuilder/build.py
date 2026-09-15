@@ -40,6 +40,7 @@ from rich.table import Table
 
 from . import vsphere
 from .cloud_init import guestinfo_extra_config
+from .openvox_site import DEFAULT_SITES, infer_location, site_for
 from .config import OvbuilderConfig, get_config_manager
 from .network import (
     PrefixParseError,
@@ -244,6 +245,11 @@ def build(
         "--skip-dnf-groups",
         help="Do not install configured DNF groups at clone/post-install time",
     ),
+    location: Optional[str] = typer.Option(
+        None,
+        "--location",
+        help="Site code (ATLC, PDXC, …). Compiler VIP is chosen from this.",
+    ),
 ):
     """
     Build a VM from a Packer golden template (default) or legacy ISO.
@@ -283,6 +289,8 @@ def build(
         dns = None
     if _is_optioninfo(skip_dnf_groups):
         skip_dnf_groups = False
+    if _is_optioninfo(location):
+        location = None
 
     # --- Config + terraform path --------------------------------------------
     cfg: OvbuilderConfig = (
@@ -529,6 +537,18 @@ def build(
         else:
             console.print("[dim]No DNS servers entered.[/dim]")
 
+        guessed = infer_location(
+            location=location,
+            hostname=hostname or "",
+            domain=cfg.domain,
+            networks=cfg.networks,
+        )
+        loc_default = guessed or "PDXC"
+        location = Prompt.ask(
+            f"Location ({', '.join(sorted(DEFAULT_SITES))})",
+            default=loc_default,
+        ).strip().upper()
+
         cpus = int(Prompt.ask("CPUs", default=str(cfg.default_cpus)))
         memory = int(
             Prompt.ask("Memory (GB)", default=str(cfg.default_memory_gb))
@@ -613,6 +633,29 @@ def build(
             f"[dim]DNF groups at provision time: {', '.join(dnf_groups)}[/dim]"
         )
 
+    if not location:
+        location = infer_location(
+            hostname=hostname or "",
+            domain=cfg.domain,
+            networks=cfg.networks,
+        )
+    location = (location or "").strip().upper()
+    try:
+        ov_site = site_for(location) if location else None
+    except KeyError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if ov_site:
+        console.print(
+            f"[dim]OpenVox site {location}: server={ov_site.compiler} "
+            f"ca_server={ov_site.ca_server} gui={ov_site.gui}[/dim]"
+        )
+    else:
+        console.print(
+            "[yellow]No OpenVox location resolved; "
+            "clone will skip agent install. Pass --location.[/yellow]"
+        )
+
     # Guestinfo only for golden clones (ISO guests get network via SSH later).
     guestinfo = {}
     if provision_mode == "golden":
@@ -625,6 +668,7 @@ def build(
             domain=cfg.domain,
             default_user=default_user,
             dnf_groups=dnf_groups,
+            openvox_site=ov_site,
         )
 
     # Map CLI golden → Terraform clone; keep iso as iso.
@@ -717,11 +761,9 @@ def build(
                 f"[bold]{ip}/{prefix_len}[/bold]\n"
                 f"• SSH when Tools/network settle: "
                 f"[bold]{default_user}@{ip}[/bold]\n"
-                f"• OpenVox agent (after ACLs allow "
-                f"{cfg.openvox_server}:8140):\n"
-                f"  curl -k --noproxy {cfg.openvox_server} "
-                f"https://{cfg.openvox_server}:8140/packages/install.bash "
-                f"| sudo bash\n\n"
+                f"• OpenVox: location [bold]{location or 'unset'}[/bold] "
+                f"server=[bold]{ov_site.compiler if ov_site else cfg.openvox_server}[/bold] "
+                f"ca=[bold]{ov_site.ca_server if ov_site else 'ovca.corp.int-x.ai'}[/bold]\n\n"
                 "[dim]No console OS install required. "
                 "Install media detached.[/dim]",
                 title="Golden clone complete",
@@ -746,6 +788,7 @@ def build(
                 gateway=gateway,
                 dns=dns,
                 openvox_server=cfg.openvox_server,
+                openvox_site=ov_site,
                 configure_network=False,
                 # Golden cloud-init already ran groups; do not re-run over SSH.
                 dnf_groups=[],
@@ -826,6 +869,7 @@ def build(
         gateway=gateway,
         dns=dns,
         openvox_server=cfg.openvox_server,
+        openvox_site=ov_site,
         configure_network=True,
         dnf_groups=dnf_groups,
     )
