@@ -231,6 +231,7 @@ ovbuilder build --yes --mode iso \
 | `--gateway` | Optional default gateway |
 | `--dns` | DNS server (repeat or comma-separate; interactive: one per prompt until empty) |
 | `--cpus` / `--memory` / `--disk` | Size (memory in **GB**) |
+| `--location ATLC` | Site code (ATLC, PDXC). Picks local compiler VIP + GUI repo |
 | `--skip-dnf-groups` | Do not install configured EL package groups |
 | `--yes` / `-y` | No prompts (requires hostname, IP, and OS or ISO) |
 | `-V` / `--version` | Print version |
