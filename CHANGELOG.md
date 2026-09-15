@@ -5,6 +5,16 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta19] - 2026-09-15
+
+### Added
+
+- **Datastore clusters (Storage DRS)** — interview lists StoragePod
+  names (YAVIN-DEV/PROD, HOTH_DEV/PROD). Terraform sets
+  ``datastore_cluster_id`` so SDRS picks the member LUN. Single
+  datastore remains a fallback. ISO libraries still use a real
+  datastore.
+
 ## [0.97-beta18] - 2026-09-15
 
 ### Added

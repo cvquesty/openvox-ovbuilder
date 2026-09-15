@@ -19,9 +19,10 @@
 
 locals {
   # Prefer dedicated ISO datastore; fall back to VM datastore when unset.
-  iso_ds    = var.iso_datastore != null && var.iso_datastore != "" ? var.iso_datastore : var.vm_datastore
-  is_clone  = var.provision_mode == "clone"
-  is_iso    = var.provision_mode == "iso"
+  iso_ds   = var.iso_datastore != null && var.iso_datastore != "" ? var.iso_datastore : var.vm_datastore
+  is_clone = var.provision_mode == "clone"
+  is_iso   = var.provision_mode == "iso"
+  use_dsc  = var.vm_datastore_cluster != null && var.vm_datastore_cluster != ""
   # Map of guestinfo.* keys from ovbuilder (base64 metadata/userdata).
   guestinfo = var.guestinfo_extra_config
 }
@@ -35,7 +36,14 @@ data "vsphere_compute_cluster" "cluster" {
   datacenter_id = data.vsphere_datacenter.dc.id
 }
 
+data "vsphere_datastore_cluster" "vm_dsc" {
+  count         = local.use_dsc ? 1 : 0
+  name          = var.vm_datastore_cluster
+  datacenter_id = data.vsphere_datacenter.dc.id
+}
+
 data "vsphere_datastore" "vm_ds" {
+  count         = local.use_dsc ? 0 : 1
   name          = var.vm_datastore
   datacenter_id = data.vsphere_datacenter.dc.id
 }
@@ -63,10 +71,11 @@ data "vsphere_virtual_machine" "template" {
 resource "vsphere_virtual_machine" "from_template" {
   count = local.is_clone ? 1 : 0
 
-  name             = var.vm_name
-  resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
-  datastore_id     = data.vsphere_datastore.vm_ds.id
-  folder           = var.folder != "" ? var.folder : null
+  name                 = var.vm_name
+  resource_pool_id     = data.vsphere_compute_cluster.cluster.resource_pool_id
+  datastore_id         = local.use_dsc ? null : data.vsphere_datastore.vm_ds[0].id
+  datastore_cluster_id = local.use_dsc ? data.vsphere_datastore_cluster.vm_dsc[0].id : null
+  folder               = var.folder != "" ? var.folder : null
 
   num_cpus                = var.num_cpus
   memory                  = var.memory_mb
@@ -110,10 +119,11 @@ resource "vsphere_virtual_machine" "from_template" {
 resource "vsphere_virtual_machine" "from_iso" {
   count = local.is_iso ? 1 : 0
 
-  name             = var.vm_name
-  resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
-  datastore_id     = data.vsphere_datastore.vm_ds.id
-  folder           = var.folder != "" ? var.folder : null
+  name                 = var.vm_name
+  resource_pool_id     = data.vsphere_compute_cluster.cluster.resource_pool_id
+  datastore_id         = local.use_dsc ? null : data.vsphere_datastore.vm_ds[0].id
+  datastore_cluster_id = local.use_dsc ? data.vsphere_datastore_cluster.vm_dsc[0].id : null
+  folder               = var.folder != "" ? var.folder : null
 
   num_cpus                = var.num_cpus
   memory                  = var.memory_mb

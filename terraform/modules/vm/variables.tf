@@ -18,8 +18,14 @@ variable "cluster" {
 }
 
 variable "vm_datastore" {
-  description = "Datastore where the VM files (config + disks) will be created"
+  description = "Single datastore for VM disks (ignored when vm_datastore_cluster is set)"
   type        = string
+}
+
+variable "vm_datastore_cluster" {
+  description = "Storage DRS datastore cluster name. Empty = place on vm_datastore."
+  type        = string
+  default     = ""
 }
 
 variable "provision_mode" {

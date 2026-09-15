@@ -49,8 +49,14 @@ variable "vm_name" {
 }
 
 variable "vm_datastore" {
-  description = "Datastore to place the VM files and disks"
+  description = "Single datastore for VM disks (ignored when vm_datastore_cluster is set)"
   type        = string
+}
+
+variable "vm_datastore_cluster" {
+  description = "Storage DRS datastore cluster (YAVIN-PROD, HOTH_DEV, …). Empty = use vm_datastore."
+  type        = string
+  default     = ""
 }
 
 variable "iso_datastore" {

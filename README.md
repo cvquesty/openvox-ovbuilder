@@ -143,7 +143,7 @@ ovbuilder build
 You will be asked for:
 
 - vCenter hostname and login
-- Datacenter, cluster, datastore, network(s)
+- Datacenter, compute cluster, datastore cluster (or single datastore), network(s)
 - OS (golden template), or ISO if you chose legacy mode
 - Hostname, IP, subnet prefix, optional gateway/DNS
 - CPU, memory (GB), disk (GB, always thin-provisioned)
@@ -279,6 +279,9 @@ Create the directory if it does not exist. vSphere passwords are **not** written
 terraform_dir: ""   # blank = bundled or /opt/ovbuilder/terraform
 vsphere_server: vcenter.example.com
 vm_datastore: vsanDatastore
+# Prefer a Storage DRS cluster (YAVIN-PROD, HOTH_DEV, …) so vCenter
+# picks the LUN. Empty = use vm_datastore.
+vm_datastore_cluster: YAVIN-PROD
 iso_datastore: isos
 networks:
   - "VM Production"
@@ -329,7 +332,8 @@ known_isos:
 | Variable | Purpose |
 |----------|---------|
 | `OVBUILDER_TERRAFORM_DIR` | Terraform root module path |
-| `OVBUILDER_VM_DATASTORE` | Default VM datastore |
+| `OVBUILDER_VM_DATASTORE` | Default VM datastore (single LUN fallback) |
+| `OVBUILDER_VM_DATASTORE_CLUSTER` | Storage DRS cluster (YAVIN-PROD, HOTH_DEV, …) |
 | `OVBUILDER_ISO_DATASTORE` | Default ISO datastore |
 | `OVBUILDER_OPENVOX_SERVER` | OpenVox compile/CA host for agent install |
 | `OVBUILDER_PROVISION_MODE` | `golden` or `iso` |
@@ -373,7 +377,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta18` |
+| ovbuilder CLI | `0.97-beta19` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |

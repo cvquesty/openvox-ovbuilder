@@ -274,6 +274,11 @@ def run_terraform_apply(
         "vsphere_datacenter": vars.get("datacenter", config.datacenter),
         "vsphere_cluster": vars.get("cluster", config.cluster),
         "vm_datastore": vars.get("vm_datastore", config.vm_datastore),
+        "vm_datastore_cluster": vars.get(
+            "vm_datastore_cluster",
+            getattr(config, "vm_datastore_cluster", ""),
+        )
+        or "",
         "iso_datastore": vars.get("iso_datastore", config.iso_datastore),
         "vm_name": vm_name,
         "iso_path": vars.get("iso_path") or "",

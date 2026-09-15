@@ -9,12 +9,13 @@
 module "vm" {
   source = "./modules/vm"
 
-  vm_name       = var.vm_name
-  datacenter    = var.vsphere_datacenter
-  cluster       = var.vsphere_cluster
-  vm_datastore  = var.vm_datastore
-  iso_datastore = var.iso_datastore
-  iso_path      = var.iso_path
+  vm_name              = var.vm_name
+  datacenter           = var.vsphere_datacenter
+  cluster              = var.vsphere_cluster
+  vm_datastore         = var.vm_datastore
+  vm_datastore_cluster = var.vm_datastore_cluster
+  iso_datastore        = var.iso_datastore
+  iso_path             = var.iso_path
 
   provision_mode         = var.provision_mode
   template_name          = var.template_name

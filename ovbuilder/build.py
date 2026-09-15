@@ -364,18 +364,38 @@ def build(
         )
 
         dss = vsphere.list_datastores(si, dc)
-        if not dss:
-            vm_ds = Prompt.ask("VM Datastore", default=cfg.vm_datastore)
-            iso_ds = Prompt.ask("ISO Datastore", default=cfg.iso_datastore)
-        else:
-            vm_ds = _prompt_table_choice(f"Datastores in {dc} (VM)", dss)
-            if provision_mode == "iso":
-                iso_ds = _prompt_table_choice(
-                    f"Datastores in {dc} (ISO)", dss
+        dscs = vsphere.list_datastore_clusters(si, dc)
+        vm_dsc = ""
+        if dscs:
+            # Prefer Storage DRS clusters (YAVIN-*, HOTH_*). Last row
+            # falls back to a single datastore when SDRS is not wanted.
+            cluster_choices = list(dscs) + ["Single datastore (pick a LUN)"]
+            picked = _prompt_table_choice(
+                f"Datastore clusters in {dc} (VM disks)",
+                cluster_choices,
+            )
+            if picked == "Single datastore (pick a LUN)":
+                vm_ds = (
+                    _prompt_table_choice(f"Datastores in {dc} (VM)", dss)
+                    if dss
+                    else Prompt.ask("VM Datastore", default=cfg.vm_datastore)
                 )
             else:
-                # Golden path does not need ISO datastore for clone.
-                iso_ds = cfg.iso_datastore
+                vm_dsc = picked
+                vm_ds = cfg.vm_datastore
+        elif dss:
+            vm_ds = _prompt_table_choice(f"Datastores in {dc} (VM)", dss)
+        else:
+            vm_ds = Prompt.ask("VM Datastore", default=cfg.vm_datastore)
+
+        if provision_mode == "iso":
+            iso_ds = (
+                _prompt_table_choice(f"Datastores in {dc} (ISO library)", dss)
+                if dss
+                else Prompt.ask("ISO Datastore", default=cfg.iso_datastore)
+            )
+        else:
+            iso_ds = cfg.iso_datastore
 
         nets = vsphere.list_networks(si, dc)
         if not nets:
@@ -479,6 +499,7 @@ def build(
         cfg.datacenter = dc
         cfg.cluster = cluster
         cfg.vm_datastore = vm_ds
+        cfg.vm_datastore_cluster = vm_dsc
         cfg.iso_datastore = iso_ds
         cfg.networks = networks
 
@@ -688,6 +709,7 @@ def build(
         "datacenter": cfg.datacenter,
         "cluster": cfg.cluster,
         "vm_datastore": cfg.vm_datastore,
+        "vm_datastore_cluster": getattr(cfg, "vm_datastore_cluster", "") or "",
         "iso_datastore": cfg.iso_datastore,
         "vsphere_server": cfg.vsphere_server,
         "vsphere_user": vsphere_user,

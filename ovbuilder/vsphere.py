@@ -209,6 +209,27 @@ def list_datastores(si, datacenter_name: str) -> List[str]:
     return sorted(ds.name for ds in dc.datastore)
 
 
+def list_datastore_clusters(si, datacenter_name: str) -> List[str]:
+    """
+    Return Storage DRS datastore-cluster (StoragePod) names in this DC.
+
+    YAVIN-DEV / YAVIN-PROD (ATLC) and HOTH_DEV / HOTH_PROD (PDXC) are
+    this type. Placing a VM on the cluster lets SDRS pick a member
+    datastore; operators do not pick individual LUNs.
+    """
+    dc = _find_datacenter(si, datacenter_name)
+    if not dc:
+        return []
+    content = _content(si)
+    view = content.viewManager.CreateContainerView(
+        dc, [vim.StoragePod], True
+    )
+    try:
+        return sorted(pod.name for pod in view.view)
+    finally:
+        view.Destroy()
+
+
 def list_networks(si, datacenter_name: str) -> List[str]:
     """
     Return sorted network / port-group names visible on the datacenter.

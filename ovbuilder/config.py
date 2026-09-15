@@ -102,6 +102,9 @@ class OvbuilderConfig(BaseModel):
     # --- vSphere placement defaults (overridden by interactive discovery) ---
     vsphere_server: str = "vcenter.example.com"
     vm_datastore: str = "vsanDatastore"
+    # Storage DRS cluster (YAVIN-PROD, HOTH_DEV, …). When set, Terraform
+    # places the VM on the cluster instead of a single datastore.
+    vm_datastore_cluster: str = ""
     iso_datastore: str = "isos"
     networks: List[str] = Field(default_factory=lambda: ["VM Production"])
     datacenter: str = "Main DC"
@@ -201,6 +204,8 @@ class ConfigManager:
             cfg.terraform_dir = td
         if ds := os.environ.get("OVBUILDER_VM_DATASTORE"):
             cfg.vm_datastore = ds
+        if dsc := os.environ.get("OVBUILDER_VM_DATASTORE_CLUSTER"):
+            cfg.vm_datastore_cluster = dsc
         if ids := os.environ.get("OVBUILDER_ISO_DATASTORE"):
             cfg.iso_datastore = ids
         if srv := os.environ.get("OVBUILDER_OPENVOX_SERVER") or os.environ.get(
