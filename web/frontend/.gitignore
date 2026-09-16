@@ -1,0 +1,14 @@
+# Frontend (React + Mantine) build output
+web/frontend/node_modules/
+web/frontend/dist/
+web/frontend/.vite/
+
+# Backend
+web/backend/__pycache__/
+web/backend/*.egg-info/
+web/backend/.venv/
+
+# Env / secrets
+.env
+*.pem
+*.key

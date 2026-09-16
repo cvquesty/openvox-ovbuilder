@@ -1,0 +1,42 @@
+/* OpenVox OV Builder — global styles matching the OpenVox GUI design language. */
+
+:root {
+  --ov-accent: #C0392B;
+  --ov-accent-soft: rgba(192, 57, 43, 0.10);
+  --ov-line: #e2e6ee;
+  --ov-surface: #f3f5f8;
+}
+
+[data-mantine-color-scheme='dark'] {
+  --ov-line: #2a2d3a;
+  --ov-surface: #12131c;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar styling to match the GUI's clean look */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ov-line) transparent;
+}
+
+/* Mantine NavLink active state uses the accent */
+.mantine-NavLink-root[data-active] {
+  background-color: var(--ov-accent-soft) !important;
+}
+
+/* Card hover lift */
+.mantine-Card-root {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.mantine-Card-root:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
