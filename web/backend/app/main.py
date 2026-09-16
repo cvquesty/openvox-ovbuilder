@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,9 +11,18 @@ from .api import auth as auth_api
 from .api import builds as builds_api
 from .api import inventory as inventory_api
 from .config import get_settings
+from .database import init_db
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+
+
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
