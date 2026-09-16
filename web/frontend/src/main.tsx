@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { BrowserRouter } from 'react-router';
 import { App } from './App';
+import { AuthProvider } from './hooks/AuthContext';
 import { ThemeProvider, useAppTheme } from './hooks/ThemeContext';
 import { lightTheme, darkTheme } from './theme';
 import '@mantine/core/styles.css';
@@ -26,7 +27,9 @@ function ThemedApp() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>
-      <ThemedApp />
+      <AuthProvider>
+        <ThemedApp />
+      </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>
 );

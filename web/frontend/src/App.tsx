@@ -11,8 +11,19 @@ function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?
   const { user, loading } = useAuth();
   if (loading) return <Center style={{ minHeight: '100vh' }}><Loader color="ovred" /></Center>;
   if (!user) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/build" replace />;
+  if (roles && !roles.includes(user.role)) {
+    // Viewers (and anyone without build access) land on the jobs list, not /build.
+    return <Navigate to="/jobs" replace />;
+  }
   return <>{children}</>;
+}
+
+function DefaultRedirect() {
+  const { user } = useAuth();
+  if (user && (user.role === 'admin' || user.role === 'builder')) {
+    return <Navigate to="/build" replace />;
+  }
+  return <Navigate to="/jobs" replace />;
 }
 
 export function App() {
@@ -23,8 +34,8 @@ export function App() {
         <Route path="/build" element={<ProtectedRoute roles={["admin", "builder"]}><BuildFormPage /></ProtectedRoute>} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/jobs/:id" element={<JobDetailPage />} />
-        <Route path="/" element={<Navigate to="/build" replace />} />
-        <Route path="*" element={<Navigate to="/build" replace />} />
+        <Route path="/" element={<DefaultRedirect />} />
+        <Route path="*" element={<DefaultRedirect />} />
       </Route>
     </Routes>
   );
