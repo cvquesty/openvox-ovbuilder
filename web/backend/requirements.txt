@@ -1,10 +1,12 @@
 # Web backend dependencies (install into the same venv as ovbuilder, or a
-# dedicated one). Pinned loosely; tighten for production.
+# dedicated one). Pinned to known-good versions; run `pip-audit` in CI.
 fastapi>=0.110
 uvicorn[standard]>=0.27
 pydantic>=2.0
 pydantic-settings>=2.0
-python-jose[cryptography]>=3.3
+# PyJWT replaces python-jose, which has multiple unpatched CVEs
+# (e.g. algorithm confusion). PyJWT is actively maintained.
+PyJWT>=2.8
 passlib[bcrypt]>=1.7
 python-multipart>=0.0.9
 ldap3>=2.9

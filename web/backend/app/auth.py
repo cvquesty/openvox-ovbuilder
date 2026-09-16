@@ -11,9 +11,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from .config import Settings, get_settings
@@ -180,7 +180,7 @@ def create_token(username: str, role: Role, settings: Settings) -> str:
 def decode_token(token: str, settings: Settings) -> Optional[Dict[str, Any]]:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 
