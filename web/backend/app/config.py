@@ -2,6 +2,9 @@
 
 Loaded from environment variables (and optionally a .env file). Mirrors the
 keys your openvox-gui LDAP config uses so the same directory works for both.
+
+Bare-metal defaults: Redis and Postgres run as local system services, not in
+containers. Override via .env if you ever containerize.
 """
 
 from __future__ import annotations
@@ -55,13 +58,13 @@ class Settings(BaseSettings):
     ldap_ssl_verify: bool = False
     ldap_connection_timeout: int = 10
 
-    # --- Celery / Redis -----------------------------------------------------
-    redis_url: str = "redis://redis:6379/0"
-    celery_broker_url: str = "redis://redis:6379/1"
-    celery_result_backend: str = "redis://redis:6379/2"
+    # --- Celery / Redis (local system services, not containers) ------------
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    celery_broker_url: str = "redis://127.0.0.1:6379/1"
+    celery_result_backend: str = "redis://127.0.0.1:6379/2"
 
-    # --- Postgres (build history + audit) -----------------------------------
-    database_url: str = "postgresql+asyncpg://ovbuilder:ovbuilder@postgres:5432/ovbuilder"
+    # --- Postgres (local system service) ------------------------------------
+    database_url: str = "postgresql+asyncpg://ovbuilder:ovbuilder@127.0.0.1:5432/ovbuilder"
 
     # --- ovbuilder CLI integration -----------------------------------------
     # The web backend shells out to `ovbuilder build --yes ...`.
@@ -70,6 +73,8 @@ class Settings(BaseSettings):
     ovbuilder_home: str = "/opt/ovbuilder"
     # How many concurrent Celery workers may run builds at once.
     max_concurrent_builds: int = 4
+    # Hard ceiling on a single build's wall time (seconds).
+    build_time_limit_seconds: int = 60 * 60
 
 
 @lru_cache

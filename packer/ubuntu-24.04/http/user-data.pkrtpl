@@ -2,6 +2,10 @@
 # Ubuntu 24.04 autoinstall — ovbuilder golden (NO DHCP)
 # Templated by Packer: ssh_password + ssh_password_crypted from local pkrvars
 # (never commit real values). Generate crypted: openssl passwd -6 'your-password'
+#
+# The ubuntu user is created with password 'ubuntu' and the password is expired
+# on first login (chage -d 0). Puppet removes the account on its first run, so
+# the credential is single-use and never lingers.
 autoinstall:
   version: 1
   locale: en_US.UTF-8
@@ -41,10 +45,16 @@ autoinstall:
         shell: /bin/bash
         sudo: ALL=(ALL) NOPASSWD:ALL
         lock_passwd: false
+        # Expire the password so the first interactive login forces a change
+        # (or Puppet deletes the account entirely on its first run).
+        expire: true
   late-commands:
     - echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/ubuntu
     - chmod 440 /target/etc/sudoers.d/ubuntu
-    - curtin in-target --target=/target -- bash -c "echo 'ubuntu:${ssh_password}' | chpasswd; echo 'root:${ssh_password}' | chpasswd"
+    # Set the well-known initial password, then expire it immediately.
+    - curtin in-target --target=/target -- bash -c "echo 'ubuntu:ubuntu' | chpasswd"
+    - curtin in-target --target=/target -- chage -d 0 ubuntu || true
+    - curtin in-target --target=/target -- bash -c "echo 'root:${ssh_password}' | chpasswd"
     - curtin in-target --target=/target -- passwd -u ubuntu || true
     - curtin in-target --target=/target -- passwd -u root || true
     - curtin in-target --target=/target -- systemctl enable open-vm-tools.service || true
