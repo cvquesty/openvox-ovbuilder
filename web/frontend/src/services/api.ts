@@ -31,14 +31,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const auth = {
-  login: (username: string, password: string) =>
-    request<{ access_token: string; token_type: string; role: string; username: string }>('/auth/login', {
+  login: (username: string, password: string) => {
+    // FastAPI's OAuth2PasswordRequestForm expects application/x-www-form-urlencoded,
+    // not JSON. Sending JSON caused 422 Unprocessable Entity on every login.
+    const body = new URLSearchParams();
+    body.append('username', username);
+    body.append('password', password);
+    return request<{ access_token: string; token_type: string; role: string; username: string }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
     }).then((data) => {
       localStorage.setItem('ovbuilder_token', data.access_token);
       return data;
-    }),
+    });
+  },
   me: () => request<{ username: string; role: string; display_name?: string; email?: string }>('/auth/me'),
   logout: () => {
     localStorage.removeItem('ovbuilder_token');
