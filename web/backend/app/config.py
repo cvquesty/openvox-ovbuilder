@@ -9,10 +9,11 @@ containers. Override via .env if you ever containerize.
 
 from __future__ import annotations
 
+import secrets
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,8 +27,24 @@ class Settings(BaseSettings):
     # --- App ----------------------------------------------------------------
     app_name: str = "OpenVox OV Builder"
     debug: bool = False
-    secret_key: str = Field(default="change-me-in-production", min_length=16)
+    # No insecure default. If SECRET_KEY is unset we generate an ephemeral one
+    # (fine for dev, but tokens won't survive restarts) and log a loud warning.
+    secret_key: str = Field(default="")
     access_token_expire_minutes: int = 60 * 8
+
+    @field_validator("secret_key")
+    @classmethod
+    def _require_secret(cls, v: str) -> str:
+        if not v or v in ("change-me-in-production", "change-me-to-a-long-random-string"):
+            import logging
+            logging.getLogger(__name__).warning(
+                "SECRET_KEY is unset or using the example value; "
+                "generating an ephemeral key. Set SECRET_KEY in .env for production."
+            )
+            return secrets.token_urlsafe(48)
+        if len(v) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters")
+        return v
 
     # --- CORS (React dev server + production origin) ------------------------
     cors_origins: list[str] = Field(
@@ -55,7 +72,8 @@ class Settings(BaseSettings):
     ldap_default_role: str = "viewer"
     ldap_use_ssl: bool = False
     ldap_use_starttls: bool = False
-    ldap_ssl_verify: bool = False
+    # Default to verifying certs; override to false only for lab/dev.
+    ldap_ssl_verify: bool = True
     ldap_connection_timeout: int = 10
 
     # --- Celery / Redis (local system services, not containers) ------------
@@ -67,13 +85,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://ovbuilder:ovbuilder@127.0.0.1:5432/ovbuilder"
 
     # --- ovbuilder CLI integration -----------------------------------------
-    # The web backend shells out to `ovbuilder build --yes ...`.
     ovbuilder_binary: str = "ovbuilder"
-    # Directory the CLI uses for its own config/secrets (golden password, etc.).
     ovbuilder_home: str = "/opt/ovbuilder"
-    # How many concurrent Celery workers may run builds at once.
     max_concurrent_builds: int = 4
-    # Hard ceiling on a single build's wall time (seconds).
     build_time_limit_seconds: int = 60 * 60
 
 
