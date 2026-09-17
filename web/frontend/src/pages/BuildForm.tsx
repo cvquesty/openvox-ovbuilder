@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Stack, Title, Text, TextInput, NumberInput, Select, TagsInput, Button,
   Group, Card, Divider, Alert, Loader, Center, Switch,
@@ -24,6 +24,15 @@ function isAlmaOs(key: string, label?: string) {
   return `${key} ${label || ''}`.toLowerCase().includes('alma');
 }
 
+function focusFirstInvalid() {
+  requestAnimationFrame(() => {
+    const el = document.querySelector<HTMLElement>(
+      '[aria-invalid="true"], [data-invalid="true"] input, [data-error] input',
+    );
+    el?.focus();
+  });
+}
+
 export function BuildFormPage() {
   const navigate = useNavigate();
   const [osImages, setOsImages] = useState<OsImage[]>([]);
@@ -31,6 +40,7 @@ export function BuildFormPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
 
   const form = useForm<BuildRequest>({
     initialValues: {
@@ -59,8 +69,8 @@ export function BuildFormPage() {
       },
       gateway: (v) => {
         const t = (v || '').trim();
-        if (!t) return null;
-        if (!IPV4_RE.test(t)) return 'Invalid IPv4 gateway';
+        if (!t) return null; // optional
+        if (!IPV4_RE.test(t)) return 'Invalid IPv4 address';
         return null;
       },
       dns: (v) => {
@@ -93,6 +103,10 @@ export function BuildFormPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
+
   const selectedOs = useMemo(
     () => osImages.find((o) => o.key === form.values.os_image),
     [osImages, form.values.os_image],
@@ -106,31 +120,36 @@ export function BuildFormPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSkipDnf]);
 
-  const handleSubmit = form.onSubmit(async (values) => {
-    setError(null);
-    setSubmitting(true);
-    try {
-      const payload: BuildRequest = {
-        ...values,
-        hostname: values.hostname.trim(),
-        ip: values.ip.trim(),
-        gateway: values.gateway?.trim() || undefined,
-        skip_dnf_groups: showSkipDnf ? !!values.skip_dnf_groups : false,
-      };
-      const job = await builds.submit(payload);
-      notifications.show({
-        title: 'Build queued',
-        message: `${payload.hostname} is in the queue`,
-        color: 'green',
-        icon: <IconCheck size={16} />,
-      });
-      navigate(`/jobs/${job.id}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit build');
-    } finally {
-      setSubmitting(false);
-    }
-  });
+  const handleSubmit = form.onSubmit(
+    async (values) => {
+      setError(null);
+      setSubmitting(true);
+      try {
+        const payload: BuildRequest = {
+          ...values,
+          hostname: values.hostname.trim(),
+          ip: values.ip.trim(),
+          gateway: values.gateway?.trim() || undefined,
+          skip_dnf_groups: showSkipDnf ? !!values.skip_dnf_groups : false,
+        };
+        const job = await builds.submit(payload);
+        notifications.show({
+          title: 'Build queued',
+          message: `${payload.hostname} is in the queue`,
+          color: 'green',
+          icon: <IconCheck size={16} />,
+        });
+        navigate(`/jobs/${job.id}`);
+      } catch (err: any) {
+        setError(err.message || 'Failed to submit build');
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    () => {
+      focusFirstInvalid();
+    },
+  );
 
   if (loading) {
     return <Center style={{ minHeight: 300 }}><Loader /></Center>;
@@ -146,7 +165,7 @@ export function BuildFormPage() {
       </div>
 
       {error && (
-        <Alert color="red" icon={<IconAlertCircle size={16} />} title="Error">{error}</Alert>
+        <Alert ref={errorRef} tabIndex={-1} color="red" icon={<IconAlertCircle size={16} />} title="Error">{error}</Alert>
       )}
 
       <Card shadow="sm" padding="lg" radius="md" withBorder>

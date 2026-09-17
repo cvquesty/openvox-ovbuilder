@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Stack, Title, Text, Group, Badge, Card, Code, ScrollArea, Alert, Button, Loader, Center,
-  Modal, SimpleGrid, Box,
+  Modal, SimpleGrid, Box, VisuallyHidden,
 } from '@mantine/core';
 import { IconArrowLeft, IconAlertCircle, IconCheck, IconX } from '@tabler/icons-react';
 import { builds, type BuildJob } from '../services/api';
@@ -29,7 +29,9 @@ export function JobDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [logCue, setLogCue] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
+  const prevLogLen = useRef(0);
 
   const load = () => {
     if (!id) return;
@@ -49,6 +51,15 @@ export function JobDetailPage() {
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [job?.log_tail]);
+
+  // Short live-region cue when the log grows — avoid announcing the full log block.
+  useEffect(() => {
+    const len = job?.log_tail?.length ?? 0;
+    if (len > 0 && len !== prevLogLen.current) {
+      if (prevLogLen.current > 0) setLogCue('Log updated');
+      prevLogLen.current = len;
+    }
   }, [job?.log_tail]);
 
   const onCancel = async () => {
@@ -72,6 +83,7 @@ export function JobDetailPage() {
 
   const r = job.request;
   const canCancel = job.status === 'queued' || job.status === 'running';
+  const lineCount = job.log_tail ? job.log_tail.split('\n').length : 0;
   return (
     <Stack gap="lg" maw={800}>
       <Group>
@@ -102,7 +114,7 @@ export function JobDetailPage() {
         {job.finished_at && (<Box><Text size="xs" c="dimmed">Finished</Text><Text size="sm">{fmt(job.finished_at)}</Text></Box>)}
       </SimpleGrid>
 
-      <div aria-live="polite">
+      <div>
         {job.status === 'cancelled' && (
           <Alert color="gray" icon={<IconX size={16} />} title="Build cancelled">{job.error || 'Cancelled by user.'}</Alert>
         )}
@@ -122,8 +134,9 @@ export function JobDetailPage() {
       <Card shadow="sm" padding={0} radius="md" withBorder>
         <Group justify="space-between" px="md" py="sm" style={{ borderBottom: '1px solid var(--ov-line)' }}>
           <Text fw={600} size="sm">Build log</Text>
-          <Text size="xs" c="dimmed" aria-live="polite">{job.log_tail ? job.log_tail.split('\n').length : 0} lines</Text>
+          <Text size="xs" c="dimmed">{lineCount} lines</Text>
         </Group>
+        <VisuallyHidden aria-live="polite">{logCue}</VisuallyHidden>
         <ScrollArea h={420} viewportRef={logRef} p="md">
           <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'transparent' }}>
             {job.log_tail || 'No output yet\u2026'}

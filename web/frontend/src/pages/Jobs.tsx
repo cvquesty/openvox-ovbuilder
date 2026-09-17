@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Stack, Title, Text, Table, Badge, Group, ActionIcon, Tooltip, Center, Loader, Alert, Button, ScrollArea, Anchor,
+  Stack, Title, Text, Table, Badge, Group, ActionIcon, Tooltip, Center, Loader, Alert, Button,
+  ScrollArea, Anchor, Card, Box,
 } from '@mantine/core';
 import { IconRefresh, IconAlertCircle, IconEye, IconRocket } from '@tabler/icons-react';
 import { builds, type BuildJob } from '../services/api';
@@ -16,6 +17,21 @@ const STATUS_COLOR: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge color={STATUS_COLOR[status] || 'gray'} variant="light">{status}</Badge>;
+}
+
+function JobCard({ job }: { job: BuildJob }) {
+  return (
+    <Card withBorder padding="md" radius="md" component={Link} to={`/jobs/${job.id}`} style={{ textDecoration: 'none', color: 'inherit' }} aria-label={`View job for ${job.request.hostname}`}>
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Box style={{ minWidth: 0 }}>
+          <Text fw={600} truncate>{job.request.hostname}</Text>
+          <Text size="sm" c="dimmed">{job.request.os_image} · {job.request.environment}</Text>
+          <Text size="xs" c="dimmed" mt={4}>{new Date(job.created_at).toLocaleString()}</Text>
+        </Box>
+        <StatusBadge status={job.status} />
+      </Group>
+    </Card>
+  );
 }
 
 export function JobsPage() {
@@ -91,46 +107,54 @@ export function JobsPage() {
           )}
         </Stack>
       ) : (
-        <ScrollArea>
-          <Table striped highlightOnHover miw={640}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Hostname</Table.Th>
-                <Table.Th>OS</Table.Th>
-                <Table.Th>Env</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th>Requested</Table.Th>
-                <Table.Th></Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {jobs.map((j) => (
-                <Table.Tr key={j.id}>
-                  <Table.Td>
-                    <Anchor component={Link} to={`/jobs/${j.id}`} fw={500} aria-label={`View job for ${j.request.hostname}`}>
-                      {j.request.hostname}
-                    </Anchor>
-                  </Table.Td>
-                  <Table.Td>{j.request.os_image}</Table.Td>
-                  <Table.Td>{j.request.environment}</Table.Td>
-                  <Table.Td><StatusBadge status={j.status} /></Table.Td>
-                  <Table.Td><Text size="sm" c="dimmed">{new Date(j.created_at).toLocaleString()}</Text></Table.Td>
-                  <Table.Td>
-                    <ActionIcon
-                      component={Link}
-                      to={`/jobs/${j.id}`}
-                      variant="subtle"
-                      color="gray"
-                      aria-label={`Open job ${j.request.hostname}`}
-                    >
-                      <IconEye size={16} />
-                    </ActionIcon>
-                  </Table.Td>
+        <>
+          <Stack gap="sm" hiddenFrom="sm">
+            {jobs.map((j) => (
+              <JobCard key={j.id} job={j} />
+            ))}
+          </Stack>
+
+          <ScrollArea visibleFrom="sm">
+            <Table striped highlightOnHover miw={640}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Hostname</Table.Th>
+                  <Table.Th>OS</Table.Th>
+                  <Table.Th>Env</Table.Th>
+                  <Table.Th>Status</Table.Th>
+                  <Table.Th>Requested</Table.Th>
+                  <Table.Th></Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea>
+              </Table.Thead>
+              <Table.Tbody>
+                {jobs.map((j) => (
+                  <Table.Tr key={j.id}>
+                    <Table.Td>
+                      <Anchor component={Link} to={`/jobs/${j.id}`} fw={500} aria-label={`View job for ${j.request.hostname}`}>
+                        {j.request.hostname}
+                      </Anchor>
+                    </Table.Td>
+                    <Table.Td>{j.request.os_image}</Table.Td>
+                    <Table.Td>{j.request.environment}</Table.Td>
+                    <Table.Td><StatusBadge status={j.status} /></Table.Td>
+                    <Table.Td><Text size="sm" c="dimmed">{new Date(j.created_at).toLocaleString()}</Text></Table.Td>
+                    <Table.Td>
+                      <ActionIcon
+                        component={Link}
+                        to={`/jobs/${j.id}`}
+                        variant="subtle"
+                        color="gray"
+                        aria-label={`Open job ${j.request.hostname}`}
+                      >
+                        <IconEye size={16} />
+                      </ActionIcon>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        </>
       )}
     </Stack>
   );
