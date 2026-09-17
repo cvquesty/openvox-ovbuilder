@@ -13,7 +13,9 @@ This guide covers **macOS, Linux, and Windows**.
 | Golden / clone login password | `secrets.env` or `OVBUILDER_GOLDEN_PASSWORD` | `ovbuilder build` (cloud-init guestinfo) |
 | HTTP/HTTPS proxy (with auth) | `secrets.env` `OVBUILDER_HTTP_PROXY` | Clone-time apt/dnf/profile.d |
 | Packer vCenter + golden password | `packer/variables.auto.pkrvars.hcl` (gitignored) | `packer build` |
-| vSphere password for ovbuilder | CLI prompt, `--vsphere-password`, or `VSPHERE_PASSWORD` / `TF_VAR_vsphere_password` | Terraform |
+| vSphere password for ovbuilder | CLI prompt, env (`VSPHERE_PASSWORD` / `OVBUILDER_VSPHERE_PASSWORD` / `TF_VAR_vsphere_password`), or `secrets.env`. Avoid `--vsphere-password` (visible in `ps`) | Terraform + web worker |
+| Web API JWT secret | `web/backend/.env` `SECRET_KEY` (required unless `DEBUG=true`) | FastAPI |
+| LDAP TLS CA | `LDAP_CA_CERTS_FILE` PEM path | Web LDAP bind |
 
 ### Config directory (where `secrets.env` goes)
 

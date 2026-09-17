@@ -24,18 +24,20 @@ from app.database import (
     save_job_sync,
     update_job_log_sync,
 )
-from app.models import BuildJob, BuildRequest, BuildStatus
+from app.models import BuildJob, BuildRequest, BuildStatus, redact_build_request
 
 
 def _job(**kwargs) -> BuildJob:
     data = dict(
         id=str(uuid.uuid4()),
         status=BuildStatus.queued,
-        request=BuildRequest(
-            hostname="web01",
-            ip="10.0.0.8",
-            os_image="ubuntu-24.04",
-            vsphere_password="s3cret",
+        request=redact_build_request(
+            BuildRequest(
+                hostname="web01",
+                ip="10.0.0.8",
+                os_image="ubuntu-24.04",
+                vsphere_password="s3cret",
+            )
         ),
         requested_by="alice",
         created_at=datetime.now(timezone.utc),
@@ -63,8 +65,8 @@ def test_sync_save_get_list(job_db):
     assert loaded is not None
     assert loaded.status == BuildStatus.queued
     assert loaded.request.hostname == "web01"
-    # Stored for the worker; response schemas must still redact this.
-    assert loaded.request.vsphere_password == "s3cret"
+    # API redacts before persist; the worker gets the password on the Celery payload only.
+    assert loaded.request.vsphere_password is None
     listed = list_jobs_sync(username="alice")
     assert [j.id for j in listed] == [job.id]
     assert list_jobs_sync(username="bob") == []

@@ -47,24 +47,24 @@ def test_create_list_detail_redact_password(api):
     body = created.json()
     assert body["status"] == "queued"
     assert body["requested_by"] == "alice"
-    assert body["request"]["vsphere_password"] is None
+    assert "vsphere_password" not in body["request"]
     assert body["celery_task_id"] == "celery-task-1"
     job_id = body["id"]
 
     stored = get_job_sync(job_id)
     assert stored is not None
-    assert stored.request.vsphere_password == "s3cret"
+    assert stored.request.vsphere_password is None
 
     listed = api.get("/api/builds")
     assert listed.status_code == 200
     rows = listed.json()
     assert len(rows) == 1
     assert rows[0]["id"] == job_id
-    assert rows[0]["request"]["vsphere_password"] is None
+    assert "vsphere_password" not in rows[0]["request"]
 
     detail = api.get(f"/api/builds/{job_id}")
     assert detail.status_code == 200
-    assert detail.json()["request"]["vsphere_password"] is None
+    assert "vsphere_password" not in detail.json()["request"]
 
 
 def test_builder_cannot_read_someone_elses_job(api):
@@ -96,7 +96,7 @@ def test_cancel_queued_job(api, monkeypatch):
     assert cancelled.status_code == 200, cancelled.text
     body = cancelled.json()
     assert body["status"] == "cancelled"
-    assert body["request"]["vsphere_password"] is None
+    assert "vsphere_password" not in body["request"]
     stored = get_job_sync(job_id)
     assert stored is not None
     assert stored.status == BuildStatus.cancelled

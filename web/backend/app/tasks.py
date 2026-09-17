@@ -21,6 +21,13 @@ from .notify import notify_job
 
 settings = get_settings()
 
+# Names the CLI / Terraform already honor. Never put the password on argv.
+_VSPHERE_PASSWORD_ENV = (
+    "VSPHERE_PASSWORD",
+    "TF_VAR_vsphere_password",
+    "OVBUILDER_VSPHERE_PASSWORD",
+)
+
 celery_app = Celery(
     "ovbuilder_web",
     broker=settings.celery_broker_url,
@@ -77,8 +84,10 @@ def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
     env_vars["HOME"] = settings.ovbuilder_home
     env_vars["XDG_CONFIG_HOME"] = os.path.join(settings.ovbuilder_home, ".config")
     env_vars["XDG_DATA_HOME"] = os.path.join(settings.ovbuilder_home, ".local/share")
-    if req.get("vsphere_password"):
-        env_vars["OVBUILDER_VSPHERE_PASSWORD"] = req["vsphere_password"]
+    password = req.get("vsphere_password")
+    if password:
+        for key in _VSPHERE_PASSWORD_ENV:
+            env_vars[key] = password
 
     return cmd, env_vars
 

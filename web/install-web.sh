@@ -67,7 +67,7 @@ cat <<EOF
 
 Web platform installed.
 
-  1. Edit ${ROOT}/web/backend/.env  (LDAP, SECRET_KEY, vSphere, DATABASE_URL)
+  1. Edit ${ROOT}/web/backend/.env  (LDAP, required SECRET_KEY, vSphere, DATABASE_URL)
   2. cd ${ROOT}/web/backend && ${VENV}/bin/alembic upgrade head
   3. systemctl start ovbuilder-web ovbuilder-worker
   4. Point nginx at ${ROOT}/web/frontend/dist and proxy /api to 127.0.0.1:4567
