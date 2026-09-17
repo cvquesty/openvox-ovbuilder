@@ -1,4 +1,4 @@
-"""Build submission + status polling.
+"""Build submission + status polling + cancel.
 
 vSphere credentials are stripped from every response the API returns to the
 browser. They are only ever consumed server-side by the Celery worker.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional as Optional_dt
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -29,13 +29,13 @@ class BuildJobPublic(BaseModel):
     request: BuildRequest
     requested_by: str
     created_at: datetime
-    started_at: Optional_dt[datetime] = None
-    finished_at: Optional_dt[datetime] = None
-    celery_task_id: Optional_dt[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    celery_task_id: Optional[str] = None
     log_tail: str = ""
-    error: Optional_dt[str] = None
-    vm_ip: Optional_dt[str] = None
-    vm_name: Optional_dt[str] = None
+    error: Optional[str] = None
+    vm_ip: Optional[str] = None
+    vm_name: Optional[str] = None
 
     @classmethod
     def from_job(cls, job: BuildJob) -> "BuildJobPublic":
@@ -63,17 +63,12 @@ async def submit_build(
     user: UserOut = Depends(require_builder),
 ):
     settings = get_settings()
-    cap = int(getattr(settings, "max_queued_per_user", 8) or 8)
     existing = await list_jobs(username=user.username)
-    queued = sum(
-        1
-        for j in existing
-        if j.status in (BuildStatus.queued, BuildStatus.running, BuildStatus.cancelling)
-    )
-    if queued >= cap:
+    queued = sum(1 for j in existing if j.status in (BuildStatus.queued, BuildStatus.running))
+    if queued >= settings.max_queued_per_user:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            f"Queue cap reached ({cap} active jobs). Wait for one to finish or cancel it.",
+            f"You already have {queued} active builds (cap {settings.max_queued_per_user})",
         )
 
     job = BuildJob(
@@ -116,18 +111,15 @@ async def cancel_build(job_id: str, user: UserOut = Depends(require_builder)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
     if user.role != Role.admin and job.requested_by != user.username:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your job")
-    if job.status in (BuildStatus.succeeded, BuildStatus.failed, BuildStatus.cancelled):
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Job already {job.status.value}")
+    if job.status not in (BuildStatus.queued, BuildStatus.running, BuildStatus.cancelling):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot cancel a {job.status.value} job")
 
     if job.celery_task_id:
         celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
 
-    if job.status == BuildStatus.queued:
-        job.status = BuildStatus.cancelled
+    job.status = BuildStatus.cancelled if job.status == BuildStatus.queued else BuildStatus.cancelling
+    if job.status == BuildStatus.cancelled:
         job.finished_at = datetime.now(timezone.utc)
-        job.error = f"Cancelled by {user.username}"
-    else:
-        job.status = BuildStatus.cancelling
-        job.error = f"Cancel requested by {user.username}"
+    job.error = "Cancelled by user"
     await save_job(job)
     return BuildJobPublic.from_job(job)
