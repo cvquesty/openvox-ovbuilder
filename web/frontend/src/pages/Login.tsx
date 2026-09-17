@@ -19,7 +19,8 @@ export function LoginPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      const from = (location.state as any)?.from?.pathname || '/build';
+      const from = (location.state as any)?.from?.pathname
+        || (user.role === 'admin' || user.role === 'builder' ? '/build' : '/jobs');
       navigate(from, { replace: true });
     }
   }, [user, loading, navigate, location]);
@@ -30,8 +31,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       await login(username, password);
-      const from = (location.state as any)?.from?.pathname || '/build';
-      navigate(from, { replace: true });
+      navigate('/', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {
@@ -40,7 +40,7 @@ export function LoginPage() {
   };
 
   if (loading) {
-    return <Center style={{ minHeight: '100vh' }}><Loader color="ovred" /></Center>;
+    return <Center style={{ minHeight: '100vh' }}><Loader /></Center>;
   }
 
   return (
@@ -48,8 +48,8 @@ export function LoginPage() {
       style={{
         minHeight: '100vh',
         background: !isDark
-          ? 'radial-gradient(1200px 500px at 50% -10%, rgba(192,57,43,0.08), transparent 60%), #f3f5f8'
-          : 'radial-gradient(1200px 500px at 50% -10%, rgba(192,57,43,0.14), transparent 55%), #12131c',
+          ? 'radial-gradient(1200px 500px at 50% -10%, rgba(13,110,253,0.10), transparent 60%), #f3f5f8'
+          : 'radial-gradient(1200px 500px at 50% -10%, rgba(236,134,34,0.16), transparent 55%), #12131c',
       }}
     >
       <Card shadow="lg" padding="xl" radius="lg" style={{ width: 400, border: '1px solid var(--ov-line)' }}>
@@ -83,7 +83,7 @@ export function LoginPage() {
               required
               size="md"
             />
-            <Button type="submit" fullWidth loading={submitting} size="md" mt="sm" leftSection={<IconLock size={18} />} color="ovred">
+            <Button type="submit" fullWidth loading={submitting} size="md" mt="sm" leftSection={<IconLock size={18} />}>
               Sign In
             </Button>
           </Stack>
