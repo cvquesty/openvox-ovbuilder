@@ -1,5 +1,5 @@
-import { useState, useEffect, ReactNode } from 'react';
-import { Outlet, useNavigate, useLocation, Navigate } from 'react-router';
+import { useState } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router';
 import {
   AppShell as MantineAppShell,
   NavLink,
@@ -12,7 +12,6 @@ import {
   Badge,
   ActionIcon,
   Tooltip,
-  Stack,
 } from '@mantine/core';
 import {
   IconRocket,
@@ -22,6 +21,7 @@ import {
   IconSun,
   IconMoon,
   IconActivity,
+  IconServer,
 } from '@tabler/icons-react';
 import { useAuth } from '../hooks/AuthContext';
 import { useAppTheme } from '../hooks/ThemeContext';
@@ -34,6 +34,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { label: 'Build a VM', icon: IconRocket, path: '/build' },
+  { label: 'Virtual machines', icon: IconServer, path: '/vms' },
   { label: 'My Builds', icon: IconListDetails, path: '/jobs' },
 ];
 
@@ -44,7 +45,7 @@ export function AppShellLayout() {
   const { user, logout } = useAuth();
   const { isDark, toggle } = useAppTheme();
 
-  const logoSrc = isDark ? '/openvox-logo-red.svg' : '/openvox-logo-red.svg';
+  const logoSrc = '/openvox-logo-red.svg';
   const titleColor = !isDark ? '#0f172a' : undefined;
 
   const renderNav = (item: NavItem) => {
