@@ -32,8 +32,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const auth = {
   login: (username: string, password: string) => {
-    // FastAPI's OAuth2PasswordRequestForm expects application/x-www-form-urlencoded,
-    // not JSON. Sending JSON caused 422 Unprocessable Entity on every login.
     const body = new URLSearchParams();
     body.append('username', username);
     body.append('password', password);
@@ -57,6 +55,7 @@ export const builds = {
   submit: (body: BuildRequest) => request<BuildJob>('/builds', { method: 'POST', body: JSON.stringify(body) }),
   list: () => request<BuildJob[]>('/builds'),
   get: (id: string) => request<BuildJob>(`/builds/${id}`),
+  cancel: (id: string) => request<BuildJob>(`/builds/${id}/cancel`, { method: 'POST' }),
 };
 
 export const inventory = {
@@ -64,6 +63,23 @@ export const inventory = {
   environments: () => request<Environment[]>('/inventory/environments'),
   clusters: () => request<string[]>('/inventory/clusters'),
   networks: () => request<string[]>('/inventory/networks'),
+};
+
+export const vms = {
+  list: () => request<InventoryVm[]>('/vms'),
+  powerOn: (name: string) =>
+    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/power-on`, { method: 'POST' }),
+  powerOff: (name: string) =>
+    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/power-off`, { method: 'POST' }),
+  reboot: (name: string) =>
+    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/reboot`, { method: 'POST' }),
+  snapshot: (name: string, snapName: string, description = '') =>
+    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/snapshot`, {
+      method: 'POST',
+      body: JSON.stringify({ name: snapName, description }),
+    }),
+  destroy: (name: string) =>
+    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };
 
 export interface BuildRequest {
@@ -86,7 +102,7 @@ export interface BuildRequest {
 
 export interface BuildJob {
   id: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelling' | 'cancelled';
   request: BuildRequest;
   requested_by: string;
   created_at: string;
@@ -109,4 +125,17 @@ export interface Environment {
   key: string;
   label: string;
   datastore_cluster: string;
+}
+
+export interface InventoryVm {
+  name: string;
+  power_state: string;
+  guest_os?: string;
+  ip?: string | null;
+  cpus?: number | null;
+  memory_mb?: number | null;
+  uuid?: string | null;
+  tools?: string;
+  folder?: string | null;
+  overall_status?: string;
 }
