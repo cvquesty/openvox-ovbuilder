@@ -4,12 +4,12 @@
 
 **Build OpenVox-ready VMware VMs from Packer golden templates (or a legacy ISO) — without memorizing Terraform every time.**
 
-[![Version](https://img.shields.io/badge/version-0.97--beta17-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.97--beta20-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Terraform](https://img.shields.io/badge/Terraform-1.5%2B-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)](https://terraform.io)
 
-[Quick Start](#quick-start) · [Install](#install) · [Usage](#usage) · [Configuration](#configuration) · [Secrets](docs/SECRETS.md) · [Changelog](CHANGELOG.md)
+[Quick Start](#quick-start) · [Install](#install) · [Usage](#usage) · [Configuration](#configuration) · [Web platform](docs/WEB.md) · [Secrets](docs/SECRETS.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -108,6 +108,19 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
 Add the venv `Scripts` folder to your user PATH, or activate the venv each session.
+
+### Dedicated web box (optional)
+
+`./install.sh` installs the **CLI only**. The self-service SPA, FastAPI, and
+Celery worker are a separate bare-metal path on a Linux host with Postgres,
+Redis, and Nginx:
+
+```bash
+sudo ./install.sh
+sudo ./web/install-web.sh
+```
+
+Prerequisites, `.env`, systemd, nginx, and health checks: **[docs/WEB.md](docs/WEB.md)**.
 
 ### Manual / development install (any OS)
 
@@ -377,7 +390,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta19` |
+| ovbuilder CLI | `0.97-beta20` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
@@ -438,6 +451,7 @@ Each hostname has isolated state under the data directory `tfstate/<hostname>/`.
 | Doc | Audience |
 |-----|----------|
 | [README.md](README.md) (this file) | Everyone — install, use, configure |
+| [docs/WEB.md](docs/WEB.md) | Dedicated-box web install (nginx + systemd) |
 | [docs/SECRETS.md](docs/SECRETS.md) | Everyone — passwords and credentials |
 | [packer/README.md](packer/README.md) | People who build golden templates |
 | [terraform/modules/vm/README.md](terraform/modules/vm/README.md) | People calling Terraform directly |
