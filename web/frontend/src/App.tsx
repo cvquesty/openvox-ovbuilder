@@ -6,14 +6,23 @@ import { BuildFormPage } from './pages/BuildForm';
 import { JobsPage } from './pages/Jobs';
 import { JobDetailPage } from './pages/JobDetail';
 import { VMsPage } from './pages/VMs';
-import { Center, Loader } from '@mantine/core';
+import { Alert, Center, Loader, Stack, Text } from '@mantine/core';
+import { IconLock } from '@tabler/icons-react';
 
 function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
   const { user, loading } = useAuth();
-  if (loading) return <Center style={{ minHeight: '100vh' }}><Loader color="ovred" /></Center>;
+  if (loading) return <Center style={{ minHeight: '100vh' }}><Loader /></Center>;
   if (!user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to="/jobs" replace />;
+    return (
+      <Stack maw={480} mx="auto" mt="xl" p="md">
+        <Alert color="orange" icon={<IconLock size={16} />} title="Access denied">
+          <Text size="sm">
+            Your role ({user.role}) cannot access this page. Contact an administrator if you need access.
+          </Text>
+        </Alert>
+      </Stack>
+    );
   }
   return <>{children}</>;
 }
