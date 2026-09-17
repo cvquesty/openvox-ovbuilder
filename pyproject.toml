@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ovbuilder"
-version = "0.97-beta19"
+version = "0.97-beta20"
 description = "ovbuilder — OpenVox command-line tool for building VMware VMs from ISO"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -41,3 +41,9 @@ Repository = "https://github.com/cvquesty/openvox-gui"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ovbuilder*"]
+
+# Keep the CLI pytest job scoped to ./tests so it does not collect
+# web/backend/tests (those run from web/backend with their own deps).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# web/backend/tests is collected from that directory (see web/backend/pytest.ini).

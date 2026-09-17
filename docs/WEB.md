@@ -39,3 +39,15 @@ Parallel Celery workers do not share a state file. Do not run bare
 - `GET /api/vms` — live VM list
 - `POST /api/vms/{name}/power-on|power-off|reboot|snapshot`
 - `DELETE /api/vms/{name}` — admin only
+
+## Backend tests
+
+Pytest smokes the login contract, build RBAC, the job store, and argv/secret
+redaction. They use SQLite (`aiosqlite`) and mock LDAP + Celery, so they do
+not need Postgres, Redis, a directory, or the `ovbuilder` CLI.
+
+```bash
+cd web/backend
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q
+```

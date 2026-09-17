@@ -5,6 +5,16 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta20] - 2026-09-17
+
+### Added
+
+- **Web backend smoke tests** — pytest coverage for OAuth2 form login
+  (success/failure), admin/builder/viewer gates on `/api/builds`, SQLite
+  job-store create/list/get, and vSphere password kept off CLI argv and
+  nulled in public job payloads. Run from `web/backend` with
+  `requirements-dev.txt` (no live LDAP, Postgres, or ovbuilder CLI).
+
 ## [0.97-beta19] - 2026-09-15
 
 ### Added
