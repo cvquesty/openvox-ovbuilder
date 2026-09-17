@@ -14,6 +14,7 @@ This guide covers **macOS, Linux, and Windows**.
 | HTTP/HTTPS proxy (with auth) | `secrets.env` `OVBUILDER_HTTP_PROXY` | Clone-time apt/dnf/profile.d |
 | Packer vCenter + golden password | `packer/variables.auto.pkrvars.hcl` (gitignored) | `packer build` |
 | vSphere password for ovbuilder | CLI prompt, `--vsphere-password`, or `VSPHERE_PASSWORD` / `TF_VAR_vsphere_password` | Terraform |
+| vSphere password for the web app | `/opt/ovbuilder/web/backend/.env` (`VSPHERE_PASSWORD` or `OVBUILDER_VSPHERE_PASSWORD`) or the admin Configuration page | Live inventory + VM lifecycle |
 
 ### Config directory (where `secrets.env` goes)
 

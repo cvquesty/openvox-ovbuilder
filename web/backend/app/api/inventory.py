@@ -1,16 +1,25 @@
-"""Live vSphere inventory for the form (clusters, OS images, networks).
+"""Live vSphere inventory for the build form.
 
-The web UI never exposes individual datastores — the user picks an
-environment (dev/prod) and the backend maps it to the right Storage DRS
-cluster behind the scenes.
+OS images and environment → datastore-cluster mapping come from ovbuilder
+config (single source of truth). Clusters, networks, datacenters, and
+datastore clusters are listed live via ``ovbuilder.vsphere``.
+
+Live endpoints return HTTP 502 with a clear message when vCenter is
+unreachable or credentials are missing — they never invent fake names.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
+from typing import Callable, Dict, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from ovbuilder import vsphere
+from ovbuilder.placement import (
+    default_environments,
+    environments_as_dicts,
+    os_images_as_dicts,
+)
 
 from ..auth import require_builder
 from ..models import UserOut
@@ -19,16 +28,11 @@ from ..vsphere_client import vsphere_session
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Last-resort OS rows when CLI config cannot be loaded (matches CLI defaults).
 _FALLBACK_OS = [
     {"key": "ubuntu-24.04", "label": "Ubuntu 24.04 LTS", "default_user": "ubuntu"},
     {"key": "almalinux-10", "label": "AlmaLinux 10", "default_user": "almalinux"},
 ]
-_FALLBACK_ENV = [
-    {"key": "dev", "label": "Development", "datastore_cluster": "YAVIN-DEV"},
-    {"key": "prod", "label": "Production", "datastore_cluster": "YAVIN-PROD"},
-]
-_FALLBACK_CLUSTERS = ["Production Cluster", "Development Cluster"]
-_FALLBACK_NETWORKS = ["VM Production", "VM Development"]
 
 
 def _names(items) -> List[str]:
@@ -47,69 +51,96 @@ def _names(items) -> List[str]:
     return out
 
 
-@router.get("/os-images")
-async def os_images(user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
-    try:
-        from ovbuilder.config import get_config_manager
+def _public_error(exc: Exception) -> str:
+    msg = str(exc).strip() or exc.__class__.__name__
+    return msg
 
-        cfg = get_config_manager().load_config()
-        images = getattr(cfg, "golden_images", None) or getattr(cfg, "os_images", None)
-        if isinstance(images, dict) and images:
-            rows: List[Dict[str, str]] = []
-            for key, meta in images.items():
-                if isinstance(meta, dict):
-                    rows.append({
-                        "key": str(key),
-                        "label": str(meta.get("label") or key),
-                        "default_user": str(meta.get("default_user") or meta.get("user") or ""),
-                    })
-                else:
-                    rows.append({"key": str(key), "label": str(key), "default_user": ""})
-            if rows:
-                return rows
+
+def _resolve_datacenter(si, configured: str) -> str:
+    if configured:
+        return configured
+    dcs = vsphere.list_datacenters(si)
+    if len(dcs) == 1:
+        return dcs[0]
+    if not dcs:
+        raise RuntimeError("No datacenters visible in vCenter")
+    raise RuntimeError(
+        "Multiple datacenters found; set VSPHERE_DATACENTER or "
+        "configure vsphere_datacenter in Settings / config.yaml"
+    )
+
+
+def _list_live(list_fn: Callable, *, needs_dc: bool = True) -> List[str]:
+    try:
+        with vsphere_session() as (si, datacenter):
+            if needs_dc:
+                dc = _resolve_datacenter(si, datacenter)
+                raw = list_fn(si, dc)
+            else:
+                raw = list_fn(si)
+            return _names(raw)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("live vSphere inventory failed", exc_info=True)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            _public_error(exc),
+        ) from exc
+
+
+@router.get("/os-images")
+async def os_images(_user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
+    try:
+        rows = os_images_as_dicts()
+        if rows:
+            return rows
     except Exception:
         logger.debug("os-images: CLI config unavailable, using fallback", exc_info=True)
     return list(_FALLBACK_OS)
 
 
 @router.get("/environments")
-async def environments(user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
-    return list(_FALLBACK_ENV)
+async def environments(_user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
+    try:
+        rows = environments_as_dicts()
+        if rows:
+            return rows
+    except Exception:
+        logger.warning("environment mapping unavailable; using built-in defaults", exc_info=True)
+
+    return [
+        {
+            "key": key,
+            "label": profile.label or key,
+            "datastore_cluster": profile.datastore_cluster or "",
+            "cluster": profile.cluster or "",
+        }
+        for key, profile in default_environments().items()
+    ]
+
+
+@router.get("/datacenters")
+async def datacenters(_user: UserOut = Depends(require_builder)) -> List[str]:
+    return _list_live(vsphere.list_datacenters, needs_dc=False)
 
 
 @router.get("/clusters")
-async def clusters(user: UserOut = Depends(require_builder)) -> List[str]:
-    try:
-        from ovbuilder import vsphere
-
-        with vsphere_session() as (si, datacenter):
-            raw = None
-            if hasattr(vsphere, "list_clusters"):
-                raw = vsphere.list_clusters(si, datacenter or None)
-            elif hasattr(vsphere, "list_compute_clusters"):
-                raw = vsphere.list_compute_clusters(si, datacenter or None)
-            names = _names(raw)
-            if names:
-                return names
-    except Exception:
-        logger.warning("live cluster inventory failed; using fallback", exc_info=True)
-    return list(_FALLBACK_CLUSTERS)
+async def clusters(_user: UserOut = Depends(require_builder)) -> List[str]:
+    return _list_live(vsphere.list_clusters)
 
 
 @router.get("/networks")
-async def networks(user: UserOut = Depends(require_builder)) -> List[str]:
-    try:
-        from ovbuilder import vsphere
+async def networks(_user: UserOut = Depends(require_builder)) -> List[str]:
+    return _list_live(vsphere.list_networks)
 
-        with vsphere_session() as (si, datacenter):
-            raw = None
-            if hasattr(vsphere, "list_networks"):
-                raw = vsphere.list_networks(si, datacenter or None)
-            elif hasattr(vsphere, "list_portgroups"):
-                raw = vsphere.list_portgroups(si, datacenter or None)
-            names = _names(raw)
-            if names:
-                return names
-    except Exception:
-        logger.warning("live network inventory failed; using fallback", exc_info=True)
-    return list(_FALLBACK_NETWORKS)
+
+@router.get("/datastore-clusters")
+async def datastore_clusters(_user: UserOut = Depends(require_builder)) -> List[str]:
+    return _list_live(vsphere.list_datastore_clusters)
+
+
+@router.get("/datastores")
+async def datastores(_user: UserOut = Depends(require_builder)) -> List[str]:
+    """Live datastore names. The build form does not expose these as a picker."""
+    return _list_live(vsphere.list_datastores)

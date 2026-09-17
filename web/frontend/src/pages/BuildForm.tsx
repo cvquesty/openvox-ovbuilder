@@ -37,16 +37,20 @@ export function BuildFormPage() {
   const navigate = useNavigate();
   const [osImages, setOsImages] = useState<OsImage[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [clusters, setClusters] = useState<string[]>([]);
+  const [networks, setNetworks] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inventoryWarning, setInventoryWarning] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
 
   const form = useForm<BuildRequest>({
     initialValues: {
       hostname: '', ip: '', os_image: 'ubuntu-24.04', prefix: DEFAULTS.prefix,
       cpus: DEFAULTS.cpus, memory_gb: DEFAULTS.memory_gb, disk_gb: DEFAULTS.disk_gb,
-      gateway: '', dns: [], environment: 'dev', location: '', skip_dnf_groups: false,
+      gateway: '', dns: [], environment: 'dev', cluster: '', network: '',
+      location: '', skip_dnf_groups: false,
     },
     validate: {
       hostname: (v) => {
@@ -87,19 +91,74 @@ export function BuildFormPage() {
   });
 
   useEffect(() => {
-    Promise.all([inventory.osImages(), inventory.environments()])
-      .then(([os, envs]) => {
+    let cancelled = false;
+    (async () => {
+      const [osRes, envRes, clRes, netRes] = await Promise.allSettled([
+        inventory.osImages(),
+        inventory.environments(),
+        inventory.clusters(),
+        inventory.networks(),
+      ]);
+      if (cancelled) return;
+
+      const liveErrors: string[] = [];
+      if (osRes.status === 'fulfilled') {
+        const os = osRes.value;
         setOsImages(os);
-        setEnvironments(envs);
         if (os.length && !os.find((o) => o.key === form.values.os_image)) {
           form.setFieldValue('os_image', os[0].key);
         }
+      } else {
+        setError(osRes.reason instanceof Error ? osRes.reason.message : 'Failed to load OS images');
+      }
+
+      if (envRes.status === 'fulfilled') {
+        const envs = envRes.value;
+        setEnvironments(envs);
         if (envs.length && !envs.find((e) => e.key === form.values.environment)) {
           form.setFieldValue('environment', envs[0].key);
         }
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      } else {
+        setError(envRes.reason instanceof Error ? envRes.reason.message : 'Failed to load environments');
+      }
+
+      if (clRes.status === 'fulfilled') {
+        const names = clRes.value;
+        setClusters(names);
+        if (names.length && !form.values.cluster) {
+          const envDefault = (envRes.status === 'fulfilled'
+            ? envRes.value.find((e) => e.key === form.values.environment)?.cluster
+            : '') || '';
+          form.setFieldValue('cluster', names.includes(envDefault) ? envDefault : names[0]);
+        }
+      } else {
+        liveErrors.push(clRes.reason instanceof Error ? clRes.reason.message : 'clusters unavailable');
+      }
+
+      if (netRes.status === 'fulfilled') {
+        const names = netRes.value;
+        setNetworks(names);
+        if (names.length && !form.values.network) {
+          form.setFieldValue('network', names[0]);
+        }
+      } else {
+        liveErrors.push(netRes.reason instanceof Error ? netRes.reason.message : 'networks unavailable');
+      }
+
+      if (liveErrors.length) {
+        setInventoryWarning(
+          `Live vSphere inventory is unavailable (${liveErrors.join('; ')}). `
+          + 'You can still submit; placement will use server config defaults.',
+        );
+      }
+      setLoading(false);
+    })().catch((e) => {
+      if (!cancelled) {
+        setError(e instanceof Error ? e.message : 'Failed to load inventory');
+        setLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -111,7 +170,19 @@ export function BuildFormPage() {
     () => osImages.find((o) => o.key === form.values.os_image),
     [osImages, form.values.os_image],
   );
+  const selectedEnv = useMemo(
+    () => environments.find((e) => e.key === form.values.environment),
+    [environments, form.values.environment],
+  );
   const showSkipDnf = isAlmaOs(form.values.os_image, selectedOs?.label);
+
+  useEffect(() => {
+    const preferred = selectedEnv?.cluster;
+    if (preferred && clusters.includes(preferred) && form.values.cluster !== preferred) {
+      form.setFieldValue('cluster', preferred);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEnv?.cluster, clusters]);
 
   useEffect(() => {
     if (!showSkipDnf && form.values.skip_dnf_groups) {
@@ -125,11 +196,23 @@ export function BuildFormPage() {
       setError(null);
       setSubmitting(true);
       try {
+        if (clusters.length && !values.cluster) {
+          form.setFieldError('cluster', 'Cluster is required');
+          focusFirstInvalid();
+          return;
+        }
+        if (networks.length && !values.network) {
+          form.setFieldError('network', 'Network is required');
+          focusFirstInvalid();
+          return;
+        }
         const payload: BuildRequest = {
           ...values,
           hostname: values.hostname.trim(),
           ip: values.ip.trim(),
           gateway: values.gateway?.trim() || undefined,
+          cluster: values.cluster?.trim() || undefined,
+          network: values.network?.trim() || undefined,
           skip_dnf_groups: showSkipDnf ? !!values.skip_dnf_groups : false,
         };
         const job = await builds.submit(payload);
@@ -161,11 +244,19 @@ export function BuildFormPage() {
     <Stack gap="lg" maw={640}>
       <div>
         <Title order={2} style={{ letterSpacing: '-0.02em' }}>Build a VM</Title>
-        <Text size="sm" c="dimmed" mt={4}>Pick your options and submit \u2014 the cluster handles placement.</Text>
+        <Text size="sm" c="dimmed" mt={4}>
+          Pick OS, environment, compute cluster, and network from live vCenter. Storage DRS is chosen from the environment.
+        </Text>
       </div>
 
       {error && (
         <Alert ref={errorRef} tabIndex={-1} color="red" icon={<IconAlertCircle size={16} />} title="Error">{error}</Alert>
+      )}
+
+      {inventoryWarning && (
+        <Alert color="yellow" icon={<IconAlertCircle size={16} />} title="vSphere inventory">
+          {inventoryWarning}
+        </Alert>
       )}
 
       <Card shadow="sm" padding="lg" radius="md" withBorder>
@@ -187,12 +278,40 @@ export function BuildFormPage() {
                 label="Environment"
                 data={environments.map((e) => ({ value: e.key, label: e.label }))}
                 required
+                description={
+                  selectedEnv?.datastore_cluster
+                    ? `Storage DRS: ${selectedEnv.datastore_cluster}`
+                    : undefined
+                }
                 {...form.getInputProps('environment')}
               />
             </Group>
 
+            <Group grow>
+              <Select
+                label="Compute cluster"
+                placeholder={clusters.length ? 'Select cluster' : 'Unavailable (vSphere unreachable)'}
+                data={clusters.map((name) => ({ value: name, label: name }))}
+                searchable
+                required={clusters.length > 0}
+                disabled={!clusters.length}
+                {...form.getInputProps('cluster')}
+              />
+              <Select
+                label="Network"
+                placeholder={networks.length ? 'Select network' : 'Unavailable (vSphere unreachable)'}
+                data={networks.map((name) => ({ value: name, label: name }))}
+                searchable
+                required={networks.length > 0}
+                disabled={!networks.length}
+                {...form.getInputProps('network')}
+              />
+            </Group>
+
             <Text size="xs" c="dimmed">
-              Placement is automatic \u2014 dev goes to the dev datastore cluster, prod to prod. You never pick a LUN.
+              Environment maps to a Storage DRS cluster
+              {selectedEnv?.datastore_cluster ? ` (${selectedEnv.datastore_cluster})` : ''}.
+              You never pick an individual LUN.
             </Text>
 
             <Divider label="Resources" labelPosition="center" />

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import contextmanager
 from typing import Iterator, Optional, Tuple
 
@@ -15,7 +16,9 @@ def _credentials(settings: Optional[Settings] = None) -> Tuple[str, str, str, st
     settings = settings or get_settings()
     server = settings.vsphere_server
     user = settings.vsphere_user
-    password = settings.vsphere_password
+    password = settings.vsphere_password or os.environ.get(
+        "OVBUILDER_VSPHERE_PASSWORD", ""
+    )
     datacenter = settings.vsphere_datacenter
     ignore_ssl = settings.vsphere_ignore_ssl
 

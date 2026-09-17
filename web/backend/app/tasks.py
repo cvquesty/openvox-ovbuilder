@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 
 from celery import Celery
 
+from ovbuilder.placement import datastore_cluster_for
+
 from .config import get_settings
 from .database import get_job, save_job
 from .models import BuildStatus
@@ -33,17 +35,12 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
-ENVIRONMENT_DATASTORE_CLUSTERS = {
-    "dev": "YAVIN-DEV",
-    "prod": "YAVIN-PROD",
-}
-
 _LOG_PERSIST_INTERVAL = 25
 
 
 def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
     env = (req.get("environment") or "dev").lower()
-    datastore_cluster = ENVIRONMENT_DATASTORE_CLUSTERS.get(env, ENVIRONMENT_DATASTORE_CLUSTERS["dev"])
+    datastore_cluster = datastore_cluster_for(env)
 
     cmd: list[str] = [
         settings.ovbuilder_binary,
@@ -56,8 +53,16 @@ def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
         "--cpus", str(req.get("cpus") or 2),
         "--memory", str(req.get("memory_gb") or 4),
         "--disk", str(req.get("disk_gb") or 80),
-        "--vm-datastore-cluster", datastore_cluster,
     ]
+    if datastore_cluster:
+        cmd += ["--vm-datastore-cluster", datastore_cluster]
+    if req.get("cluster"):
+        cmd += ["--cluster", req["cluster"]]
+    if req.get("network"):
+        cmd += ["--network", req["network"]]
+    for extra in req.get("networks") or []:
+        if extra and extra != req.get("network"):
+            cmd += ["--network", extra]
 
     if req.get("gateway"):
         cmd += ["--gateway", req["gateway"]]

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field
@@ -62,6 +62,19 @@ class GoldenImage(BaseModel):
     description: str = ""
 
 
+class EnvironmentProfile(BaseModel):
+    """
+    One named environment (dev / prod / …) offered in the web + CLI pickers.
+
+    ``datastore_cluster`` is the Storage DRS cluster (never an individual LUN).
+    ``cluster`` is an optional default compute cluster for this environment.
+    """
+
+    label: str = ""
+    datastore_cluster: str = ""
+    cluster: str = ""
+
+
 def _default_golden_images() -> Dict[str, GoldenImage]:
     """
     Factory for default goldens shipped with ovbuilder.
@@ -83,6 +96,38 @@ def _default_golden_images() -> Dict[str, GoldenImage]:
             description="Ubuntu 24.04 LTS (Packer golden)",
         ),
     }
+
+
+def _default_environments() -> Dict[str, EnvironmentProfile]:
+    """Factory for env → Storage DRS cluster mapping (web + worker)."""
+    return {
+        "dev": EnvironmentProfile(
+            label="Development",
+            datastore_cluster="YAVIN-DEV",
+        ),
+        "prod": EnvironmentProfile(
+            label="Production",
+            datastore_cluster="YAVIN-PROD",
+        ),
+    }
+
+
+def parse_environment_profiles(raw: Any) -> Dict[str, EnvironmentProfile]:
+    """Coerce YAML / dict values into EnvironmentProfile instances."""
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, EnvironmentProfile] = {}
+    for key, val in raw.items():
+        if isinstance(val, EnvironmentProfile):
+            out[str(key)] = val
+        elif isinstance(val, dict):
+            out[str(key)] = EnvironmentProfile(**val)
+        elif isinstance(val, str) and val.strip():
+            out[str(key)] = EnvironmentProfile(
+                label=str(key),
+                datastore_cluster=val.strip(),
+            )
+    return out
 
 
 class OvbuilderConfig(BaseModel):
@@ -127,6 +172,11 @@ class OvbuilderConfig(BaseModel):
     provision_mode: str = "golden"  # or "iso"
     golden_images: Dict[str, GoldenImage] = Field(
         default_factory=_default_golden_images
+    )
+    # Named environments for the web form / worker. Key is ``dev`` / ``prod``.
+    # datastore_cluster is the Storage DRS target; operators never pick a LUN.
+    environments: Dict[str, EnvironmentProfile] = Field(
+        default_factory=_default_environments
     )
 
     # --- Clone-time EL package groups (skipped on Ubuntu / no dnf) ----------
@@ -194,6 +244,10 @@ class ConfigManager:
                             elif isinstance(val, GoldenImage):
                                 gi[key] = val
                         valid["golden_images"] = gi
+                    if "environments" in valid:
+                        valid["environments"] = parse_environment_profiles(
+                            valid["environments"]
+                        )
                     cfg = OvbuilderConfig(**{**cfg.model_dump(), **valid})
             except Exception:
                 # Keep defaults; do not crash CLI on bad YAML.
