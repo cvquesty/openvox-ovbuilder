@@ -19,6 +19,20 @@ def _credentials(settings: Optional[Settings] = None) -> Tuple[str, str, str, st
     datacenter = settings.vsphere_datacenter
     ignore_ssl = settings.vsphere_ignore_ssl
 
+    # Admin UI runtime settings override env when present.
+    try:
+        from .runtime_settings import load_runtime_settings
+
+        rt = load_runtime_settings()
+        server = rt.vsphere_server or server
+        user = rt.vsphere_user or user
+        password = rt.vsphere_password or password
+        datacenter = rt.vsphere_datacenter or datacenter
+        if rt.vsphere_server or rt.vsphere_user or rt.vsphere_password:
+            ignore_ssl = rt.vsphere_ignore_ssl
+    except Exception:
+        logger.debug("runtime settings unavailable for vSphere", exc_info=True)
+
     # Fall back to the CLI config when the web .env omitted a field.
     try:
         from ovbuilder.config import get_config_manager

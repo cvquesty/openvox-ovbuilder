@@ -6,6 +6,7 @@ import { BuildFormPage } from './pages/BuildForm';
 import { JobsPage } from './pages/Jobs';
 import { JobDetailPage } from './pages/JobDetail';
 import { VMsPage } from './pages/VMs';
+import { SettingsPage } from './pages/Settings';
 import { Alert, Center, Loader, Stack, Text } from '@mantine/core';
 import { IconLock } from '@tabler/icons-react';
 
@@ -44,6 +45,7 @@ export function App() {
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/jobs/:id" element={<JobDetailPage />} />
         <Route path="/vms" element={<ProtectedRoute roles={["admin", "builder"]}><VMsPage /></ProtectedRoute>} />
+        <Route path="/settings" element={<ProtectedRoute roles={["admin"]}><SettingsPage /></ProtectedRoute>} />
         <Route path="/" element={<DefaultRedirect />} />
         <Route path="*" element={<DefaultRedirect />} />
       </Route>

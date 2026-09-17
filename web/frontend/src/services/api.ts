@@ -147,3 +147,28 @@ export interface InventoryVm {
   folder?: string | null;
   overall_status?: string;
 }
+
+export interface RuntimeSettings {
+  vsphere_server: string;
+  vsphere_user: string;
+  vsphere_password_set: boolean;
+  vsphere_datacenter: string;
+  vsphere_ignore_ssl: boolean;
+  npm_registry: string;
+}
+
+export interface RuntimeSettingsUpdate {
+  vsphere_server?: string;
+  vsphere_user?: string;
+  /** Omit or undefined to leave unchanged; empty string clears. */
+  vsphere_password?: string;
+  vsphere_datacenter?: string;
+  vsphere_ignore_ssl?: boolean;
+  npm_registry?: string;
+}
+
+export const settings = {
+  get: () => request<RuntimeSettings>('/settings'),
+  update: (body: RuntimeSettingsUpdate) =>
+    request<RuntimeSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) }),
+};

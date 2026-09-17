@@ -22,6 +22,7 @@ import {
   IconMoon,
   IconActivity,
   IconServer,
+  IconSettings,
 } from '@tabler/icons-react';
 import { useAuth } from '../hooks/AuthContext';
 import { useAppTheme } from '../hooks/ThemeContext';
@@ -37,6 +38,7 @@ const NAV: NavItem[] = [
   { label: 'Build a VM', icon: IconRocket, path: '/build', roles: ['admin', 'builder'] },
   { label: 'Virtual machines', icon: IconServer, path: '/vms', roles: ['admin', 'builder'] },
   { label: 'My Builds', icon: IconListDetails, path: '/jobs' },
+  { label: 'Configuration', icon: IconSettings, path: '/settings', roles: ['admin'] },
 ];
 
 export function AppShellLayout() {
