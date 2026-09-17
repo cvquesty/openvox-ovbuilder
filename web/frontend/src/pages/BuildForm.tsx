@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
-  Stack, Title, Text, TextInput, NumberInput, Select, MultiSelect, Button,
-  Group, Card, Divider, Alert, Loader, Center, Switch, Paper,
+  Stack, Title, Text, TextInput, NumberInput, Select, TagsInput, Button,
+  Group, Card, Divider, Alert, Loader, Center, Switch,
 } from '@mantine/core';
 import { IconRocket, IconCheck, IconAlertCircle } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
@@ -148,16 +148,11 @@ export function BuildFormPage() {
               <TextInput label="Prefix" placeholder="24" value={form.prefix || ''} onChange={(e) => update('prefix', e.currentTarget.value)} />
             </Group>
 
-            <MultiSelect
+            <TagsInput
               label="DNS Servers"
               placeholder="Add DNS servers"
-              data={[]}
               value={form.dns || []}
               onChange={(v) => update('dns', v)}
-              searchable
-              creatable
-              getCreateLabel={(q) => `+ Add ${q}`}
-              onCreate={(q) => q}
             />
 
             <TextInput label="Location tag" placeholder="optional" value={form.location || ''} onChange={(e) => update('location', e.currentTarget.value)} />
