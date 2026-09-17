@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # (fine for dev, but tokens won't survive restarts) and log a loud warning.
     secret_key: str = Field(default="")
     access_token_expire_minutes: int = 60 * 8
+    # How long a directory-mapped role may be reused before the next LDAP
+    # group lookup. 0 = re-check on every authenticated request. Local
+    # overrides are always applied immediately and never wait on this TTL.
+    role_cache_ttl_seconds: int = 60
 
     @field_validator("secret_key")
     @classmethod
