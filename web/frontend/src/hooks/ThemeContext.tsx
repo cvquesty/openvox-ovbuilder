@@ -19,14 +19,21 @@ export function useAppTheme() {
   return useContext(ThemeContext);
 }
 
+function preferredTheme(): AppTheme {
+  try {
+    const stored = localStorage.getItem('ovbuilder-theme');
+    if (stored === 'dark' || stored === 'light') return stored;
+  } catch { /* ignore */ }
+  try {
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+  } catch { /* ignore */ }
+  return 'light';
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<AppTheme>(() => {
-    try {
-      const stored = localStorage.getItem('ovbuilder-theme');
-      if (stored === 'dark' || stored === 'light') return stored;
-    } catch { /* ignore */ }
-    return 'light';
-  });
+  const [theme, setThemeState] = useState<AppTheme>(() => preferredTheme());
 
   useEffect(() => {
     try { localStorage.setItem('ovbuilder-theme', theme); } catch { /* ignore */ }
