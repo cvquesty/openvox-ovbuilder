@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Center, Card, Title, TextInput, PasswordInput, Button, Alert, Stack, Text, Loader,
 } from '@mantine/core';
@@ -16,6 +16,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!loading && user) {
@@ -25,9 +27,24 @@ export function LoginPage() {
     }
   }, [user, loading, navigate, location]);
 
+  useEffect(() => {
+    if (error) {
+      errorRef.current?.focus();
+    }
+  }, [error]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!username.trim()) {
+      setError('Username is required');
+      usernameRef.current?.focus();
+      return;
+    }
+    if (!password) {
+      setError('Password is required');
+      return;
+    }
     setSubmitting(true);
     try {
       await login(username, password);
@@ -62,17 +79,26 @@ export function LoginPage() {
         <form onSubmit={handleSubmit}>
           <Stack>
             {error && (
-              <Alert color="red" title="Login Failed" withCloseButton onClose={() => setError(null)}>
+              <Alert
+                ref={errorRef}
+                tabIndex={-1}
+                color="red"
+                title="Login Failed"
+                withCloseButton
+                onClose={() => setError(null)}
+              >
                 <Text size="sm" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{error}</Text>
               </Alert>
             )}
             <TextInput
+              ref={usernameRef}
               label="Username"
               placeholder="Enter your username"
               value={username}
               onChange={(e) => setUsername(e.currentTarget.value)}
               required
               autoFocus
+              autoComplete="username"
               size="md"
             />
             <PasswordInput
@@ -81,6 +107,7 @@ export function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.currentTarget.value)}
               required
+              autoComplete="current-password"
               size="md"
             />
             <Button type="submit" fullWidth loading={submitting} size="md" mt="sm" leftSection={<IconLock size={18} />}>
