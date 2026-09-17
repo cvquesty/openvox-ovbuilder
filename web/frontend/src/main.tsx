@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router';
 import { App } from './App';
 import { AuthProvider } from './hooks/AuthContext';
 import { ThemeProvider, useAppTheme } from './hooks/ThemeContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { lightTheme, darkTheme } from './theme';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
@@ -17,9 +18,13 @@ function ThemedApp() {
   return (
     <MantineProvider theme={mantineTheme} forceColorScheme={theme}>
       <Notifications position="bottom-right" />
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
+        </BrowserRouter>
+      </AuthProvider>
     </MantineProvider>
   );
 }
@@ -27,9 +32,7 @@ function ThemedApp() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>
-      <AuthProvider>
-        <ThemedApp />
-      </AuthProvider>
+      <ThemedApp />
     </ThemeProvider>
   </React.StrictMode>
 );

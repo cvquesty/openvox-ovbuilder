@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Stack, Title, Text, Table, Badge, Group, ActionIcon, Tooltip, Center, Loader, Alert } from '@mantine/core';
-import { IconRefresh, IconAlertCircle, IconEye } from '@tabler/icons-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Stack, Title, Text, Table, Badge, Group, ActionIcon, Tooltip, Center, Loader, Alert, Button, ScrollArea, Anchor,
+} from '@mantine/core';
+import { IconRefresh, IconAlertCircle, IconEye, IconRocket } from '@tabler/icons-react';
 import { builds, type BuildJob } from '../services/api';
-import { useNavigate } from 'react-router';
+import { Link } from 'react-router';
+import { useAuth } from '../hooks/AuthContext';
 
 const STATUS_COLOR: Record<string, string> = {
   queued: 'gray',
@@ -16,31 +19,44 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function JobsPage() {
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const [jobs, setJobs] = useState<BuildJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasRows = useRef(false);
 
-  const load = () => {
-    setLoading(true);
+  const load = useCallback((opts?: { background?: boolean }) => {
+    const background = opts?.background && hasRows.current;
+    if (background) setRefreshing(true);
+    else setLoading(true);
     builds.list()
-      .then(setJobs)
+      .then((rows) => {
+        setJobs(rows);
+        hasRows.current = rows.length > 0;
+        setError(null);
+      })
       .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  };
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh while any job is still running.
+  // Auto-refresh while any job is still running — do not blank the table.
   useEffect(() => {
     const hasRunning = jobs.some((j) => j.status === 'running' || j.status === 'queued');
     if (!hasRunning) return;
-    const id = setInterval(load, 5000);
+    const id = setInterval(() => load({ background: true }), 5000);
     return () => clearInterval(id);
-  }, [jobs]);
+  }, [jobs, load]);
+
+  const canBuild = user?.role === 'admin' || user?.role === 'builder';
 
   if (loading && jobs.length === 0) {
-    return <Center style={{ minHeight: 300 }}><Loader color="ovred" /></Center>;
+    return <Center style={{ minHeight: 300 }}><Loader /></Center>;
   }
 
   return (
@@ -50,38 +66,71 @@ export function JobsPage() {
           <Title order={2} style={{ letterSpacing: '-0.02em' }}>My Builds</Title>
           <Text size="sm" c="dimmed" mt={4}>{jobs.length} job{jobs.length === 1 ? '' : 's'}</Text>
         </div>
-        <Tooltip label="Refresh"><ActionIcon variant="subtle" color="gray" onClick={load}><IconRefresh size={18} /></ActionIcon></Tooltip>
+        <Tooltip label="Refresh">
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            onClick={() => load({ background: jobs.length > 0 })}
+            aria-label="Refresh jobs"
+            loading={refreshing || (loading && jobs.length > 0)}
+          >
+            <IconRefresh size={18} />
+          </ActionIcon>
+        </Tooltip>
       </Group>
 
       {error && <Alert color="red" icon={<IconAlertCircle size={16} />}>{error}</Alert>}
 
       {jobs.length === 0 ? (
-        <Text c="dimmed" ta="center" py="xl">No builds yet. Head to Build a VM to get started.</Text>
+        <Stack align="center" py="xl" gap="md">
+          <Text c="dimmed" ta="center">No builds yet.</Text>
+          {canBuild && (
+            <Button component={Link} to="/build" leftSection={<IconRocket size={16} />}>
+              Build a VM
+            </Button>
+          )}
+        </Stack>
       ) : (
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Hostname</Table.Th>
-              <Table.Th>OS</Table.Th>
-              <Table.Th>Env</Table.Th>
-              <Table.Th>Status</Table.Th>
-              <Table.Th>Requested</Table.Th>
-              <Table.Th></Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {jobs.map((j) => (
-              <Table.Tr key={j.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/jobs/${j.id}`)}>
-                <Table.Td><Text fw={500}>{j.request.hostname}</Text></Table.Td>
-                <Table.Td>{j.request.os_image}</Table.Td>
-                <Table.Td>{j.request.environment}</Table.Td>
-                <Table.Td><StatusBadge status={j.status} /></Table.Td>
-                <Table.Td><Text size="sm" c="dimmed">{new Date(j.created_at).toLocaleString()}</Text></Table.Td>
-                <Table.Td><IconEye size={16} color="var(--mantine-color-dimmed)" /></Table.Td>
+        <ScrollArea>
+          <Table striped highlightOnHover miw={640}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Hostname</Table.Th>
+                <Table.Th>OS</Table.Th>
+                <Table.Th>Env</Table.Th>
+                <Table.Th>Status</Table.Th>
+                <Table.Th>Requested</Table.Th>
+                <Table.Th></Table.Th>
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {jobs.map((j) => (
+                <Table.Tr key={j.id}>
+                  <Table.Td>
+                    <Anchor component={Link} to={`/jobs/${j.id}`} fw={500} aria-label={`View job for ${j.request.hostname}`}>
+                      {j.request.hostname}
+                    </Anchor>
+                  </Table.Td>
+                  <Table.Td>{j.request.os_image}</Table.Td>
+                  <Table.Td>{j.request.environment}</Table.Td>
+                  <Table.Td><StatusBadge status={j.status} /></Table.Td>
+                  <Table.Td><Text size="sm" c="dimmed">{new Date(j.created_at).toLocaleString()}</Text></Table.Td>
+                  <Table.Td>
+                    <ActionIcon
+                      component={Link}
+                      to={`/jobs/${j.id}`}
+                      variant="subtle"
+                      color="gray"
+                      aria-label={`Open job ${j.request.hostname}`}
+                    >
+                      <IconEye size={16} />
+                    </ActionIcon>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </ScrollArea>
       )}
     </Stack>
   );

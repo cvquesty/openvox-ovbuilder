@@ -1,13 +1,15 @@
 /* OpenVox OV Builder — global styles matching the OpenVox GUI design language. */
 
 :root {
-  --ov-accent: #C0392B;
-  --ov-accent-soft: rgba(192, 57, 43, 0.10);
+  --ov-accent: #0D6EFD;
+  --ov-accent-soft: rgba(13, 110, 253, 0.10);
   --ov-line: #e2e6ee;
   --ov-surface: #f3f5f8;
 }
 
 [data-mantine-color-scheme='dark'] {
+  --ov-accent: #EC8622;
+  --ov-accent-soft: rgba(236, 134, 34, 0.14);
   --ov-line: #2a2d3a;
   --ov-surface: #12131c;
 }
@@ -20,6 +22,22 @@ body {
   margin: 0;
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Skip link (visually hidden until focused) */
+.ov-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 10000;
+  padding: 0.5rem 1rem;
+  background: var(--ov-accent);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 0 0 4px 0;
+}
+.ov-skip-link:focus {
+  left: 0;
 }
 
 /* Scrollbar styling to match the GUI's clean look */
@@ -39,4 +57,21 @@ body {
 }
 .mantine-Card-root:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mantine-Card-root {
+    transition: none;
+  }
+  .mantine-Card-root:hover {
+    transform: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Stack, Title, Text, Group, Badge, Card, Code, ScrollArea, Alert, Button, Loader, Center,
+  Modal, SimpleGrid, Box,
 } from '@mantine/core';
 import { IconArrowLeft, IconAlertCircle, IconCheck, IconX } from '@tabler/icons-react';
 import { builds, type BuildJob } from '../services/api';
@@ -15,6 +16,11 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'gray',
 };
 
+function fmt(ts?: string) {
+  if (!ts) return '\u2014';
+  try { return new Date(ts).toLocaleString(); } catch { return ts; }
+}
+
 export function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -22,6 +28,7 @@ export function JobDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   const load = () => {
@@ -46,7 +53,7 @@ export function JobDetailPage() {
 
   const onCancel = async () => {
     if (!id || !job) return;
-    if (!window.confirm(`Cancel the build for ${job.request.hostname}?`)) return;
+    setConfirmCancel(false);
     setCancelling(true);
     setError(null);
     try {
@@ -59,7 +66,7 @@ export function JobDetailPage() {
     }
   };
 
-  if (loading && !job) return <Center style={{ minHeight: 300 }}><Loader color="ovred" /></Center>;
+  if (loading && !job) return <Center style={{ minHeight: 300 }}><Loader /></Center>;
   if (error && !job) return <Alert color="red" icon={<IconAlertCircle size={16} />}>{error}</Alert>;
   if (!job) return <Text c="dimmed">Job not found.</Text>;
 
@@ -72,9 +79,9 @@ export function JobDetailPage() {
           Back
         </Button>
         <Title order={2} style={{ letterSpacing: '-0.02em' }}>{r.hostname}</Title>
-        <Badge color={STATUS_COLOR[job.status] || 'gray'} variant="light" size="lg">{job.status}</Badge>
+        <Badge color={STATUS_COLOR[job.status] || 'gray'} variant="light" size="lg" aria-live="polite">{job.status}</Badge>
         {canCancel && (
-          <Button color="red" variant="light" loading={cancelling} onClick={onCancel}>
+          <Button color="red" variant="light" loading={cancelling} onClick={() => setConfirmCancel(true)}>
             Cancel build
           </Button>
         )}
@@ -84,40 +91,55 @@ export function JobDetailPage() {
         <Alert color="red" icon={<IconAlertCircle size={16} />}>{error}</Alert>
       )}
 
-      <Group gap="xl">
-        <Text size="sm"><Text span c="dimmed">OS:</Text> {r.os_image}</Text>
-        <Text size="sm"><Text span c="dimmed">Env:</Text> {r.environment}</Text>
-        <Text size="sm"><Text span c="dimmed">IP:</Text> {r.ip}</Text>
-        <Text size="sm"><Text span c="dimmed">By:</Text> {job.requested_by}</Text>
-        {job.vm_ip && <Text size="sm"><Text span c="dimmed">VM IP:</Text> {job.vm_ip}</Text>}
-      </Group>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+        <Box><Text size="xs" c="dimmed">OS</Text><Text size="sm">{r.os_image}</Text></Box>
+        <Box><Text size="xs" c="dimmed">Environment</Text><Text size="sm">{r.environment}</Text></Box>
+        <Box><Text size="xs" c="dimmed">IP</Text><Text size="sm">{r.ip}</Text></Box>
+        <Box><Text size="xs" c="dimmed">Requested by</Text><Text size="sm">{job.requested_by}</Text></Box>
+        {job.vm_ip && (<Box><Text size="xs" c="dimmed">VM IP</Text><Text size="sm">{job.vm_ip}</Text></Box>)}
+        <Box><Text size="xs" c="dimmed">Created</Text><Text size="sm">{fmt(job.created_at)}</Text></Box>
+        {job.started_at && (<Box><Text size="xs" c="dimmed">Started</Text><Text size="sm">{fmt(job.started_at)}</Text></Box>)}
+        {job.finished_at && (<Box><Text size="xs" c="dimmed">Finished</Text><Text size="sm">{fmt(job.finished_at)}</Text></Box>)}
+      </SimpleGrid>
 
-      {job.status === 'cancelled' && (
-        <Alert color="gray" icon={<IconX size={16} />} title="Build cancelled">{job.error || 'Cancelled by user.'}</Alert>
-      )}
-      {job.status === 'cancelling' && (
-        <Alert color="orange" icon={<IconAlertCircle size={16} />} title="Cancelling">Waiting for the worker to stop.</Alert>
-      )}
-      {job.error && job.status === 'failed' && (
-        <Alert color="red" icon={<IconX size={16} />} title="Build failed">{job.error}</Alert>
-      )}
-      {job.status === 'succeeded' && (
-        <Alert color="green" icon={<IconCheck size={16} />} title="Build succeeded">
-          {job.vm_ip ? `VM is up at ${job.vm_ip}` : 'VM provisioned successfully.'}
-        </Alert>
-      )}
+      <div aria-live="polite">
+        {job.status === 'cancelled' && (
+          <Alert color="gray" icon={<IconX size={16} />} title="Build cancelled">{job.error || 'Cancelled by user.'}</Alert>
+        )}
+        {job.status === 'cancelling' && (
+          <Alert color="orange" icon={<IconAlertCircle size={16} />} title="Cancelling">Waiting for the worker to stop.</Alert>
+        )}
+        {job.error && job.status === 'failed' && (
+          <Alert color="red" icon={<IconX size={16} />} title="Build failed">{job.error}</Alert>
+        )}
+        {job.status === 'succeeded' && (
+          <Alert color="green" icon={<IconCheck size={16} />} title="Build succeeded">
+            {job.vm_ip ? `VM is up at ${job.vm_ip}` : 'VM provisioned successfully.'}
+          </Alert>
+        )}
+      </div>
 
       <Card shadow="sm" padding={0} radius="md" withBorder>
         <Group justify="space-between" px="md" py="sm" style={{ borderBottom: '1px solid var(--ov-line)' }}>
           <Text fw={600} size="sm">Build log</Text>
-          <Text size="xs" c="dimmed">{job.log_tail ? job.log_tail.split('\n').length : 0} lines</Text>
+          <Text size="xs" c="dimmed" aria-live="polite">{job.log_tail ? job.log_tail.split('\n').length : 0} lines</Text>
         </Group>
         <ScrollArea h={420} viewportRef={logRef} p="md">
           <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'transparent' }}>
-            {job.log_tail || 'No output yet…'}
+            {job.log_tail || 'No output yet\u2026'}
           </Code>
         </ScrollArea>
       </Card>
+
+      <Modal opened={confirmCancel} onClose={() => setConfirmCancel(false)} title="Cancel build" centered>
+        <Stack>
+          <Text size="sm">Cancel the build for <strong>{job.request.hostname}</strong>?</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmCancel(false)}>Keep building</Button>
+            <Button color="red" loading={cancelling} onClick={onCancel}>Cancel build</Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

@@ -2,6 +2,14 @@
 
 const BASE = '/api';
 
+/** Soft 401: AuthProvider listens and navigates without a full page reload. */
+export const AUTH_UNAUTHORIZED_EVENT = 'ovbuilder:unauthorized';
+
+export function emitUnauthorized() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('ovbuilder_token');
   const headers: Record<string, string> = {
@@ -12,10 +20,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const res = await fetch(`${BASE}${path}`, { ...init, headers });
   if (res.status === 401) {
+    const hadToken = !!token;
     localStorage.removeItem('ovbuilder_token');
-    if (!window.location.pathname.startsWith('/login')) {
-      window.location.href = '/login';
-    }
+    // Only soft-expire when a session existed; bare /auth/me without a token is normal.
+    if (hadToken) emitUnauthorized();
     throw new Error('Session expired');
   }
   if (!res.ok) {
