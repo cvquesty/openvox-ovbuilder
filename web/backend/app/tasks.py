@@ -7,9 +7,7 @@ can build at once without colliding on Terraform state or vCenter sessions.
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
-import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -18,6 +16,7 @@ from celery import Celery
 from .config import get_settings
 from .database import get_job, save_job
 from .models import BuildStatus
+from .notify import notify_job
 
 settings = get_settings()
 
@@ -34,24 +33,15 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
-# Environment (dev/prod) -> Storage DRS datastore cluster name.
 ENVIRONMENT_DATASTORE_CLUSTERS = {
     "dev": "YAVIN-DEV",
     "prod": "YAVIN-PROD",
 }
 
-# How often (in log lines) to persist the job so the UI can tail progress
-# without hammering Postgres on every single line.
 _LOG_PERSIST_INTERVAL = 25
 
 
 def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
-    """Translate a BuildRequest dict into `ovbuilder build --yes ...` argv.
-
-    Secrets (vSphere password, etc.) are passed via environment variables so
-    they never appear in `ps` output. The CLI reads them from its own config
-    or from OVBUILDER_VSPHERE_PASSWORD when set.
-    """
     env = (req.get("environment") or "dev").lower()
     datastore_cluster = ENVIRONMENT_DATASTORE_CLUSTERS.get(env, ENVIRONMENT_DATASTORE_CLUSTERS["dev"])
 
@@ -86,19 +76,34 @@ def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
     env_vars["HOME"] = settings.ovbuilder_home
     env_vars["XDG_CONFIG_HOME"] = os.path.join(settings.ovbuilder_home, ".config")
     env_vars["XDG_DATA_HOME"] = os.path.join(settings.ovbuilder_home, ".local/share")
-    # Pass the vSphere password through the environment, never argv.
     if req.get("vsphere_password"):
         env_vars["OVBUILDER_VSPHERE_PASSWORD"] = req["vsphere_password"]
 
     return cmd, env_vars
 
 
+def _mark_cancelled(job, log_lines: Optional[list[str]] = None):
+    job.status = BuildStatus.cancelled
+    job.error = job.error or "Cancelled by user"
+    job.finished_at = datetime.now(timezone.utc)
+    if log_lines:
+        job.log_tail = "\n".join(log_lines)
+    save_job_sync(job)
+    try:
+        notify_job(job)
+    except Exception:
+        pass
+    return {"job_id": job.id, "status": job.status.value}
+
+
 @celery_app.task(name="ovbuilder.run_build", bind=True)
 def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict[str, Any]:
-    """Run one ovbuilder build end-to-end, updating the job registry as we go."""
     job = get_job_sync(job_id)
     if job is None:
         return {"job_id": job_id, "status": "missing"}
+
+    if job.status in (BuildStatus.cancelled, BuildStatus.cancelling):
+        return _mark_cancelled(job)
 
     job.status = BuildStatus.running
     job.started_at = datetime.now(timezone.utc)
@@ -108,6 +113,8 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
     cmd, env_vars = _build_command(req, job_id)
     log_lines: list[str] = []
     lines_since_persist = 0
+    proc = None
+    rc = 1
 
     try:
         proc = subprocess.Popen(
@@ -120,12 +127,21 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
         )
         assert proc.stdout is not None
         for line in proc.stdout:
+            latest = get_job_sync(job_id)
+            if latest is not None and latest.status in (BuildStatus.cancelled, BuildStatus.cancelling):
+                proc.terminate()
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                job = latest
+                return _mark_cancelled(job, log_lines)
+
             log_lines.append(line.rstrip("\n"))
             if len(log_lines) > 200:
                 log_lines = log_lines[-200:]
             job.log_tail = "\n".join(log_lines)
             lines_since_persist += 1
-            # Throttle DB writes: persist every N lines or on the last line.
             if lines_since_persist >= _LOG_PERSIST_INTERVAL:
                 save_job_sync(job)
                 lines_since_persist = 0
@@ -135,13 +151,20 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
         job.error = f"ovbuilder binary not found: {settings.ovbuilder_binary}"
         job.finished_at = datetime.now(timezone.utc)
         save_job_sync(job)
+        notify_job(job)
         return {"job_id": job_id, "status": job.status.value, "error": job.error}
     except Exception as exc:  # noqa: BLE001
         job.status = BuildStatus.failed
         job.error = str(exc)
         job.finished_at = datetime.now(timezone.utc)
         save_job_sync(job)
+        notify_job(job)
         return {"job_id": job_id, "status": job.status.value, "error": job.error}
+
+    latest = get_job_sync(job_id)
+    if latest is not None and latest.status in (BuildStatus.cancelled, BuildStatus.cancelling):
+        job = latest
+        return _mark_cancelled(job, log_lines)
 
     job.finished_at = datetime.now(timezone.utc)
     if rc == 0:
@@ -152,6 +175,7 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
         job.status = BuildStatus.failed
         job.error = f"ovbuilder exited with code {rc}"
     save_job_sync(job)
+    notify_job(job)
     return {"job_id": job_id, "status": job.status.value, "rc": rc}
 
 
@@ -164,10 +188,6 @@ def _extract_ip(lines: list[str]) -> Optional[str]:
             return m.group(0)
     return None
 
-
-# ---------------------------------------------------------------------------
-# Sync wrappers around the async job store (Celery tasks run in threads).
-# ---------------------------------------------------------------------------
 
 def get_job_sync(job_id: str):
     import asyncio
