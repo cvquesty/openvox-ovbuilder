@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  ActionIcon, Alert, Badge, Button, Center, Group, Loader, Modal, ScrollArea, Stack,
+  ActionIcon, Alert, Badge, Box, Button, Card, Center, Group, Loader, Modal, ScrollArea, Stack,
   Table, Text, TextInput, Title, Tooltip,
 } from '@mantine/core';
 import {
@@ -17,6 +17,68 @@ function powerColor(state: string) {
 }
 
 type ConfirmAction = 'powerOff' | 'reboot' | 'destroy';
+
+function VmActions({
+  vm,
+  busy,
+  isAdmin,
+  onPowerOn,
+  onPowerOff,
+  onReboot,
+  onSnapshot,
+  onDestroy,
+}: {
+  vm: InventoryVm;
+  busy: string | null;
+  isAdmin: boolean;
+  onPowerOn: () => void;
+  onPowerOff: () => void;
+  onReboot: () => void;
+  onSnapshot: () => void;
+  onDestroy: () => void;
+}) {
+  return (
+    <Group gap={4} wrap="nowrap">
+      <Tooltip label="Power on">
+        <ActionIcon size="sm" variant="subtle" color="green" loading={busy === vm.name}
+          aria-label={`Power on ${vm.name}`}
+          onClick={onPowerOn}>
+          <IconPlayerPlay size={16} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Power off">
+        <ActionIcon size="sm" variant="subtle" color="orange" loading={busy === vm.name}
+          aria-label={`Power off ${vm.name}`}
+          onClick={onPowerOff}>
+          <IconPlayerStop size={16} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Reboot">
+        <ActionIcon size="sm" variant="subtle" color="blue" loading={busy === vm.name}
+          aria-label={`Reboot ${vm.name}`}
+          onClick={onReboot}>
+          <IconRotate size={16} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Snapshot">
+        <ActionIcon size="sm" variant="subtle" color="gray"
+          aria-label={`Snapshot ${vm.name}`}
+          onClick={onSnapshot}>
+          <IconCamera size={16} />
+        </ActionIcon>
+      </Tooltip>
+      {isAdmin && (
+        <Tooltip label="Destroy">
+          <ActionIcon size="sm" variant="subtle" color="red" loading={busy === vm.name}
+            aria-label={`Destroy ${vm.name}`}
+            onClick={onDestroy}>
+            <IconTrash size={16} />
+          </ActionIcon>
+        </Tooltip>
+      )}
+    </Group>
+  );
+}
 
 export function VMsPage() {
   const { user } = useAuth();
@@ -65,6 +127,19 @@ export function VMsPage() {
 
   const meta = confirm ? confirmCopy[confirm.action] : null;
 
+  const actionsFor = (vm: InventoryVm) => (
+    <VmActions
+      vm={vm}
+      busy={busy}
+      isAdmin={isAdmin}
+      onPowerOn={() => act(vm.name, () => vms.powerOn(vm.name))}
+      onPowerOff={() => setConfirm({ action: 'powerOff', name: vm.name })}
+      onReboot={() => setConfirm({ action: 'reboot', name: vm.name })}
+      onSnapshot={() => { setSnapFor(vm.name); setSnapName('ovbuilder'); }}
+      onDestroy={() => setConfirm({ action: 'destroy', name: vm.name })}
+    />
+  );
+
   return (
     <Stack gap="lg">
       <Group justify="space-between">
@@ -84,74 +159,54 @@ export function VMsPage() {
       {rows.length === 0 ? (
         <Text c="dimmed" ta="center" py="xl">No VMs visible to this vCenter session.</Text>
       ) : (
-        <ScrollArea>
-          <Table striped highlightOnHover miw={700}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Power</Table.Th>
-                <Table.Th>IP</Table.Th>
-                <Table.Th>OS</Table.Th>
-                <Table.Th>vCPU / RAM</Table.Th>
-                <Table.Th></Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {rows.map((vm) => (
-                <Table.Tr key={vm.uuid || vm.name}>
-                  <Table.Td><Text fw={500}>{vm.name}</Text></Table.Td>
-                  <Table.Td><Badge color={powerColor(vm.power_state)} variant="light">{vm.power_state}</Badge></Table.Td>
-                  <Table.Td>{vm.ip || '\u2014'}</Table.Td>
-                  <Table.Td><Text size="sm" lineClamp={1}>{vm.guest_os || '\u2014'}</Text></Table.Td>
-                  <Table.Td>
-                    <Text size="sm">{vm.cpus ?? '\u2014'} / {vm.memory_mb ? `${Math.round(vm.memory_mb / 1024)} GB` : '\u2014'}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Group gap={4} wrap="nowrap">
-                      <Tooltip label="Power on">
-                        <ActionIcon size="sm" variant="subtle" color="green" loading={busy === vm.name}
-                          aria-label={`Power on ${vm.name}`}
-                          onClick={() => act(vm.name, () => vms.powerOn(vm.name))}>
-                          <IconPlayerPlay size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Power off">
-                        <ActionIcon size="sm" variant="subtle" color="orange" loading={busy === vm.name}
-                          aria-label={`Power off ${vm.name}`}
-                          onClick={() => setConfirm({ action: 'powerOff', name: vm.name })}>
-                          <IconPlayerStop size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Reboot">
-                        <ActionIcon size="sm" variant="subtle" color="blue" loading={busy === vm.name}
-                          aria-label={`Reboot ${vm.name}`}
-                          onClick={() => setConfirm({ action: 'reboot', name: vm.name })}>
-                          <IconRotate size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Snapshot">
-                        <ActionIcon size="sm" variant="subtle" color="gray"
-                          aria-label={`Snapshot ${vm.name}`}
-                          onClick={() => { setSnapFor(vm.name); setSnapName('ovbuilder'); }}>
-                          <IconCamera size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      {isAdmin && (
-                        <Tooltip label="Destroy">
-                          <ActionIcon size="sm" variant="subtle" color="red" loading={busy === vm.name}
-                            aria-label={`Destroy ${vm.name}`}
-                            onClick={() => setConfirm({ action: 'destroy', name: vm.name })}>
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      )}
-                    </Group>
-                  </Table.Td>
+        <>
+          <Stack gap="sm" hiddenFrom="sm">
+            {rows.map((vm) => (
+              <Card key={vm.uuid || vm.name} withBorder padding="md" radius="md">
+                <Group justify="space-between" align="flex-start" wrap="nowrap" mb="sm">
+                  <Box style={{ minWidth: 0 }}>
+                    <Text fw={600} truncate>{vm.name}</Text>
+                    <Text size="sm" c="dimmed" lineClamp={1}>{vm.guest_os || '\u2014'}</Text>
+                    <Text size="xs" c="dimmed" mt={4}>
+                      {vm.ip || '\u2014'} · {vm.cpus ?? '\u2014'} vCPU / {vm.memory_mb ? `${Math.round(vm.memory_mb / 1024)} GB` : '\u2014'}
+                    </Text>
+                  </Box>
+                  <Badge color={powerColor(vm.power_state)} variant="light">{vm.power_state}</Badge>
+                </Group>
+                {actionsFor(vm)}
+              </Card>
+            ))}
+          </Stack>
+
+          <ScrollArea visibleFrom="sm">
+            <Table striped highlightOnHover miw={700}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Name</Table.Th>
+                  <Table.Th>Power</Table.Th>
+                  <Table.Th>IP</Table.Th>
+                  <Table.Th>OS</Table.Th>
+                  <Table.Th>vCPU / RAM</Table.Th>
+                  <Table.Th></Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea>
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((vm) => (
+                  <Table.Tr key={vm.uuid || vm.name}>
+                    <Table.Td><Text fw={500}>{vm.name}</Text></Table.Td>
+                    <Table.Td><Badge color={powerColor(vm.power_state)} variant="light">{vm.power_state}</Badge></Table.Td>
+                    <Table.Td>{vm.ip || '\u2014'}</Table.Td>
+                    <Table.Td><Text size="sm" lineClamp={1}>{vm.guest_os || '\u2014'}</Text></Table.Td>
+                    <Table.Td>
+                      <Text size="sm">{vm.cpus ?? '\u2014'} / {vm.memory_mb ? `${Math.round(vm.memory_mb / 1024)} GB` : '\u2014'}</Text>
+                    </Table.Td>
+                    <Table.Td>{actionsFor(vm)}</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        </>
       )}
 
       <Modal opened={!!snapFor} onClose={() => setSnapFor(null)} title={`Snapshot ${snapFor || ''}`}>
