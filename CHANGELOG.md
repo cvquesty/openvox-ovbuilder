@@ -5,6 +5,23 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta20] - 2026-09-17
+
+### Fixed
+
+- **Web build jobs persist in Postgres** — the API and Celery workers now
+  share a SQLAlchemy `build_jobs` table instead of relying on per-process
+  memory or asyncio event-loop wrappers in the worker. Job list/detail/create,
+  status, and log updates survive process boundaries and restarts. RBAC
+  filtering is unchanged; vSphere passwords stay in the stored request for
+  the worker and are still redacted from API responses.
+
+### Added
+
+- **Alembic is the schema path** — `alembic upgrade head` runs from
+  `install-web.sh` and on API startup. See `docs/WEB.md` for `DATABASE_URL`
+  (asyncpg for the API, psycopg for Celery/Alembic) and how to add revisions.
+
 ## [0.97-beta19] - 2026-09-15
 
 ### Added

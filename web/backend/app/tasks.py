@@ -7,6 +7,7 @@ can build at once without colliding on Terraform state or vCenter sessions.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -14,7 +15,7 @@ from typing import Any, Dict, Optional
 from celery import Celery
 
 from .config import get_settings
-from .database import get_job, save_job
+from .database import get_job_sync, save_job_sync, update_job_log_sync
 from .models import BuildStatus
 from .notify import notify_job
 
@@ -143,7 +144,9 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
             job.log_tail = "\n".join(log_lines)
             lines_since_persist += 1
             if lines_since_persist >= _LOG_PERSIST_INTERVAL:
-                save_job_sync(job)
+                # Log-only write: a full-row save would clobber cancel status
+                # set by the API in another process.
+                update_job_log_sync(job_id, job.log_tail)
                 lines_since_persist = 0
         rc = proc.wait()
     except FileNotFoundError:
@@ -180,30 +183,9 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
 
 
 def _extract_ip(lines: list[str]) -> Optional[str]:
-    import re
     ip_re = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
     for line in reversed(lines):
         m = ip_re.search(line)
         if m:
             return m.group(0)
     return None
-
-
-def get_job_sync(job_id: str):
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(get_job(job_id))
-
-
-def save_job_sync(job) -> None:
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    loop.run_until_complete(save_job(job))
