@@ -30,7 +30,12 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -r web/backend/requirements.txt
+          pip install -e . pytest
       - run: |
+          cd web/backend && pytest -q
+      - env:
+          SECRET_KEY: test-secret-key-that-is-long-enough-32ch
+        run: |
           cd web/backend && python -c "from app.main import app; print(app.title)"
 
   web-frontend:

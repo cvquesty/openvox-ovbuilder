@@ -5,6 +5,25 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta20] - 2026-09-17
+
+### Security
+
+- **Web API never returns vSphere passwords** — `BuildRequestPublic` /
+  `BuildJobPublic` omit `vsphere_password` from the response schema.
+  The stored job row is redacted; only the Celery worker payload keeps
+  the secret for the running build.
+- **Worker does not put `--vsphere-password` on argv** (visible in `ps`).
+  Credentials go through `VSPHERE_PASSWORD` / `TF_VAR_vsphere_password` /
+  `OVBUILDER_VSPHERE_PASSWORD`. The CLI now reads those env keys and
+  `secrets.env` so `--vsphere-password` is optional.
+- **`SECRET_KEY` fails fast** unless `DEBUG=true`. Missing, empty, or
+  example values (`change-me-in-production`) refuse to boot outside
+  explicit debug. Debug mints an ephemeral key and warns.
+- **LDAP TLS** — verification stays on by default (`LDAP_SSL_VERIFY`).
+  `LDAP_USE_STARTTLS` now calls `start_tls()` before bind. Documented
+  `LDAP_CA_CERTS_FILE` PEM path for a private directory CA.
+
 ## [0.97-beta19] - 2026-09-15
 
 ### Added
