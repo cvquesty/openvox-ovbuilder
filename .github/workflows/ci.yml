@@ -32,7 +32,7 @@ jobs:
           pip install -r web/backend/requirements.txt
           pip install -e . pytest
       - run: |
-          cd web/backend && pytest -q
+          cd web/backend && PYTHONPATH=. python -m pytest -q
       - env:
           SECRET_KEY: test-secret-key-that-is-long-enough-32ch
         run: |
