@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <Stack p="xl" maw={560} mx="auto" mt="xl">
           <Alert color="red" icon={<IconAlertCircle size={16} />} title="Something broke">
             <Text size="sm" mb="md">{this.state.error.message}</Text>
-            <Button color="ovred" onClick={() => this.setState({ error: null })}>
+            <Button color="red" onClick={() => this.setState({ error: null })}>
               Try again
             </Button>
           </Alert>
