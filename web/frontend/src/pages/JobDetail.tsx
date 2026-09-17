@@ -7,7 +7,12 @@ import { builds, type BuildJob } from '../services/api';
 import { useParams, useNavigate } from 'react-router';
 
 const STATUS_COLOR: Record<string, string> = {
-  queued: 'gray', running: 'blue', succeeded: 'green', failed: 'red',
+  queued: 'gray',
+  running: 'blue',
+  succeeded: 'green',
+  failed: 'red',
+  cancelling: 'orange',
+  cancelled: 'gray',
 };
 
 export function JobDetailPage() {
@@ -16,6 +21,7 @@ export function JobDetailPage() {
   const [job, setJob] = useState<BuildJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   const load = () => {
@@ -29,7 +35,7 @@ export function JobDetailPage() {
   useEffect(() => { load(); }, [id]);
 
   useEffect(() => {
-    if (!job || (job.status !== 'running' && job.status !== 'queued')) return;
+    if (!job || !['running', 'queued', 'cancelling'].includes(job.status)) return;
     const t = setInterval(load, 3000);
     return () => clearInterval(t);
   }, [job?.status]);
@@ -38,11 +44,27 @@ export function JobDetailPage() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [job?.log_tail]);
 
+  const onCancel = async () => {
+    if (!id || !job) return;
+    if (!window.confirm(`Cancel the build for ${job.request.hostname}?`)) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      const updated = await builds.cancel(id);
+      setJob(updated);
+    } catch (e: any) {
+      setError(e.message || 'Cancel failed');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   if (loading && !job) return <Center style={{ minHeight: 300 }}><Loader color="ovred" /></Center>;
-  if (error) return <Alert color="red" icon={<IconAlertCircle size={16} />}>{error}</Alert>;
+  if (error && !job) return <Alert color="red" icon={<IconAlertCircle size={16} />}>{error}</Alert>;
   if (!job) return <Text c="dimmed">Job not found.</Text>;
 
   const r = job.request;
+  const canCancel = job.status === 'queued' || job.status === 'running';
   return (
     <Stack gap="lg" maw={800}>
       <Group>
@@ -51,7 +73,16 @@ export function JobDetailPage() {
         </Button>
         <Title order={2} style={{ letterSpacing: '-0.02em' }}>{r.hostname}</Title>
         <Badge color={STATUS_COLOR[job.status] || 'gray'} variant="light" size="lg">{job.status}</Badge>
+        {canCancel && (
+          <Button color="red" variant="light" loading={cancelling} onClick={onCancel}>
+            Cancel build
+          </Button>
+        )}
       </Group>
+
+      {error && (
+        <Alert color="red" icon={<IconAlertCircle size={16} />}>{error}</Alert>
+      )}
 
       <Group gap="xl">
         <Text size="sm"><Text span c="dimmed">OS:</Text> {r.os_image}</Text>
@@ -61,7 +92,13 @@ export function JobDetailPage() {
         {job.vm_ip && <Text size="sm"><Text span c="dimmed">VM IP:</Text> {job.vm_ip}</Text>}
       </Group>
 
-      {job.error && (
+      {job.status === 'cancelled' && (
+        <Alert color="gray" icon={<IconX size={16} />} title="Build cancelled">{job.error || 'Cancelled by user.'}</Alert>
+      )}
+      {job.status === 'cancelling' && (
+        <Alert color="orange" icon={<IconAlertCircle size={16} />} title="Cancelling">Waiting for the worker to stop.</Alert>
+      )}
+      {job.error && job.status === 'failed' && (
         <Alert color="red" icon={<IconX size={16} />} title="Build failed">{job.error}</Alert>
       )}
       {job.status === 'succeeded' && (

@@ -5,6 +5,7 @@ import { LoginPage } from './pages/Login';
 import { BuildFormPage } from './pages/BuildForm';
 import { JobsPage } from './pages/Jobs';
 import { JobDetailPage } from './pages/JobDetail';
+import { VMsPage } from './pages/VMs';
 import { Center, Loader } from '@mantine/core';
 
 function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
@@ -12,7 +13,6 @@ function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?
   if (loading) return <Center style={{ minHeight: '100vh' }}><Loader color="ovred" /></Center>;
   if (!user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) {
-    // Viewers (and anyone without build access) land on the jobs list, not /build.
     return <Navigate to="/jobs" replace />;
   }
   return <>{children}</>;
@@ -34,6 +34,7 @@ export function App() {
         <Route path="/build" element={<ProtectedRoute roles={["admin", "builder"]}><BuildFormPage /></ProtectedRoute>} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/jobs/:id" element={<JobDetailPage />} />
+        <Route path="/vms" element={<ProtectedRoute roles={["admin", "builder"]}><VMsPage /></ProtectedRoute>} />
         <Route path="/" element={<DefaultRedirect />} />
         <Route path="*" element={<DefaultRedirect />} />
       </Route>

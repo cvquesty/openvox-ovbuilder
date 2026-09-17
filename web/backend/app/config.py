@@ -89,6 +89,20 @@ class Settings(BaseSettings):
     ovbuilder_home: str = "/opt/ovbuilder"
     max_concurrent_builds: int = 4
     build_time_limit_seconds: int = 60 * 60
+    max_queued_per_user: int = 8
+
+    # --- vSphere (web worker / inventory / lifecycle) ----------------------
+    # Used by vsphere_client.py. Empty strings fall back to the CLI config.
+    vsphere_server: str = ""
+    vsphere_user: str = ""
+    vsphere_password: str = ""
+    vsphere_datacenter: str = ""
+    vsphere_ignore_ssl: bool = True
+
+    # --- Notifications (optional webhook; Slack-compatible JSON) -----------
+    notify_webhook_url: str = ""
+    notify_on_success: bool = True
+    notify_on_failure: bool = True
 
 
 @lru_cache

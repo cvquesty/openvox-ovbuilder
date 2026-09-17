@@ -16,8 +16,6 @@ class Role(str, Enum):
 
 
 class BuildRequest(BaseModel):
-    """Everything the web form collects before dispatching a build."""
-
     hostname: str = Field(..., min_length=1, max_length=63)
     ip: str
     os_image: str = Field(..., description="e.g. ubuntu-24.04, almalinux-10")
@@ -27,7 +25,6 @@ class BuildRequest(BaseModel):
     disk_gb: int = 80
     gateway: Optional[str] = None
     dns: list[str] = Field(default_factory=list)
-    # Placement is derived from environment — the user never picks a datastore.
     environment: str = Field("dev", description="dev | prod")
     location: Optional[str] = None
     vsphere_server: Optional[str] = None
@@ -41,6 +38,8 @@ class BuildStatus(str, Enum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    cancelling = "cancelling"
+    cancelled = "cancelled"
 
 
 class BuildJob(BaseModel):

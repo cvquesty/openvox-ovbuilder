@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenVox OV Builder web API
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=ovbuilder
+Group=ovbuilder
+WorkingDirectory=/opt/ovbuilder/web/backend
+Environment=PYTHONPATH=/opt/ovbuilder/web/backend
+EnvironmentFile=-/opt/ovbuilder/web/backend/.env
+ExecStart=/opt/ovbuilder/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 4567
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

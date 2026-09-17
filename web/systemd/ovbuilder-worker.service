@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenVox OV Builder Celery worker
+After=network.target redis.service postgresql.service
+Wants=redis.service postgresql.service
+
+[Service]
+Type=simple
+User=ovbuilder
+Group=ovbuilder
+WorkingDirectory=/opt/ovbuilder/web/backend
+Environment=PYTHONPATH=/opt/ovbuilder/web/backend
+EnvironmentFile=-/opt/ovbuilder/web/backend/.env
+ExecStart=/opt/ovbuilder/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
