@@ -6,7 +6,9 @@ can build at once without colliding on Terraform state or vCenter sessions.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -19,6 +21,13 @@ from .models import BuildStatus
 from .notify import notify_job
 
 settings = get_settings()
+
+# Names the CLI / Terraform already honor. Never put the password on argv.
+_VSPHERE_PASSWORD_ENV = (
+    "VSPHERE_PASSWORD",
+    "TF_VAR_vsphere_password",
+    "OVBUILDER_VSPHERE_PASSWORD",
+)
 
 celery_app = Celery(
     "ovbuilder_web",
@@ -76,8 +85,10 @@ def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
     env_vars["HOME"] = settings.ovbuilder_home
     env_vars["XDG_CONFIG_HOME"] = os.path.join(settings.ovbuilder_home, ".config")
     env_vars["XDG_DATA_HOME"] = os.path.join(settings.ovbuilder_home, ".local/share")
-    if req.get("vsphere_password"):
-        env_vars["OVBUILDER_VSPHERE_PASSWORD"] = req["vsphere_password"]
+    password = req.get("vsphere_password")
+    if password:
+        for key in _VSPHERE_PASSWORD_ENV:
+            env_vars[key] = password
 
     return cmd, env_vars
 
@@ -180,7 +191,6 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
 
 
 def _extract_ip(lines: list[str]) -> Optional[str]:
-    import re
     ip_re = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
     for line in reversed(lines):
         m = ip_re.search(line)
@@ -190,7 +200,6 @@ def _extract_ip(lines: list[str]) -> Optional[str]:
 
 
 def get_job_sync(job_id: str):
-    import asyncio
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -200,7 +209,6 @@ def get_job_sync(job_id: str):
 
 
 def save_job_sync(job) -> None:
-    import asyncio
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:

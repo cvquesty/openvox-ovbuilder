@@ -29,6 +29,36 @@ from .paths import config_dir, is_windows
 # Public env name — operators export this in CI or shell.
 ENV_GOLDEN_PASSWORD = "OVBUILDER_GOLDEN_PASSWORD"
 ENV_HTTP_PROXY = "OVBUILDER_HTTP_PROXY"
+# vSphere password: env / secrets file, never argv when the web worker runs.
+ENV_VSPHERE_PASSWORD_KEYS = (
+    "OVBUILDER_VSPHERE_PASSWORD",
+    "VSPHERE_PASSWORD",
+    "TF_VAR_vsphere_password",
+)
+
+
+def get_vsphere_password(explicit: Optional[str] = None) -> Optional[str]:
+    """
+    Resolve the vCenter password without requiring ``--vsphere-password``.
+
+    Order: explicit CLI value, then env
+    (``OVBUILDER_VSPHERE_PASSWORD``, ``VSPHERE_PASSWORD``,
+    ``TF_VAR_vsphere_password``), then the same keys in ``secrets.env``.
+    Never logged.
+    """
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    for key in ENV_VSPHERE_PASSWORD_KEYS:
+        val = os.environ.get(key, "").strip()
+        if val:
+            return val
+    env_file = secrets_env_path()
+    if env_file.is_file():
+        parsed = _parse_env_file(env_file)
+        for key in ENV_VSPHERE_PASSWORD_KEYS:
+            if parsed.get(key, "").strip():
+                return parsed[key].strip()
+    return None
 
 
 def secrets_dir() -> Path:

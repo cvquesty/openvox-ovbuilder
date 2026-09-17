@@ -58,7 +58,7 @@ cat <<EOF
 
 Web platform installed.
 
-  1. Edit ${ROOT}/web/backend/.env  (LDAP, SECRET_KEY, vSphere, Postgres)
+  1. Edit ${ROOT}/web/backend/.env  (LDAP, required SECRET_KEY, vSphere, Postgres)
   2. systemctl start ovbuilder-web ovbuilder-worker
   3. Point nginx at ${ROOT}/web/frontend/dist and proxy /api to 127.0.0.1:4567
 
