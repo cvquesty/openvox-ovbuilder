@@ -67,7 +67,8 @@ sudo ./web/install-web.sh
 
 `install-web.sh` is idempotent: it preserves an existing
 `/opt/ovbuilder/web/backend/.env`, rewrites units/nginx from the in-repo
-templates, and re-runs `alembic upgrade head`.
+templates, and re-runs `alembic upgrade head`. The API also upgrades on
+startup, so a missed install-time migrate is not fatal.
 
 Useful flags:
 
@@ -91,9 +92,10 @@ Overrides (optional):
 | `OVBUILDER_CORS_ORIGINS` | JSON list, e.g. `["https://builder.example.com"]` |
 
 3. Edit `/opt/ovbuilder/web/backend/.env` — LDAP bind password, CORS origin,
-   vSphere. `SECRET_KEY` is generated on first seed if empty. Placeholder
-   values (`change-me-in-production`, keys shorter than 32 characters) fail
-   the installer. An empty `DATABASE_URL` also fails.
+   vSphere. See [Secrets and TLS](#secrets-and-tls). `SECRET_KEY` is generated
+   on first seed if empty. Placeholder values (`change-me-in-production`, keys
+   shorter than 32 characters) fail the installer. An empty `DATABASE_URL`
+   also fails.
 
 4. Start the units (if you did not pass `--start`):
 
@@ -155,21 +157,45 @@ See also [SECRETS.md](SECRETS.md) (CLI golden password) and [BACKUP.md](BACKUP.m
 ## Database
 
 Build jobs persist in Postgres (`build_jobs`). The FastAPI app and Celery
-workers **must** share this database.
+workers are separate processes and **must** share this database — an
+in-memory store cannot see jobs across process boundaries or survive
+restarts.
 
 | Item | Value |
 |---|---|
 | Env var | `DATABASE_URL` |
 | Default | `postgresql+asyncpg://ovbuilder:ovbuilder@127.0.0.1:5432/ovbuilder` |
+| API driver | `postgresql+asyncpg://` (async SQLAlchemy) |
+| Celery / Alembic driver | `postgresql+psycopg://` (derived automatically from the same URL) |
 
-`install-web.sh` runs `alembic upgrade head` when `web/backend/alembic.ini`
-is present. Re-run after changing `.env` if Postgres was down:
+Plain `postgresql://` and `postgresql+psycopg://` URLs are accepted; the app
+normalizes them. Do not put secrets in the URL in committed files. Stored
+`request` JSON is redacted (`vsphere_password` cleared); the worker receives
+the password only on the Celery task payload.
+
+### Migrations
+
+Schema is managed with Alembic (`web/backend/alembic/`).
+`install-web.sh` runs `alembic upgrade head` when `alembic.ini` is present.
+Re-run after changing `.env` if Postgres was down:
 
 ```bash
-cd /opt/ovbuilder/web/backend
+cd /opt/ovbuilder/web/backend   # or web/backend in a checkout
+# Uses DATABASE_URL from the environment or .env
 /opt/ovbuilder/venv/bin/alembic upgrade head
 /opt/ovbuilder/venv/bin/alembic current
 ```
+
+Add a new revision after changing `JobRow` / `Base.metadata`:
+
+```bash
+cd web/backend
+alembic revision --autogenerate -m "describe the change"
+# Review the generated file, then:
+alembic upgrade head
+```
+
+The initial revision is `0001_initial_build_jobs` (`build_jobs` table).
 
 ## Terraform state
 
@@ -192,3 +218,44 @@ workers do not share a state file. Do not run bare `terraform apply` inside
 - `GET /api/vms` — live VM list
 - `POST /api/vms/{name}/power-on|power-off|reboot|snapshot`
 - `DELETE /api/vms/{name}` — admin only
+
+## Secrets and TLS
+
+### JWT `SECRET_KEY`
+
+The API process **refuses to start** if `SECRET_KEY` is missing, empty, or
+the historic example value `change-me-in-production`, unless you set
+`DEBUG=true`. Debug mode mints an ephemeral key and logs a warning; tokens
+do not survive a restart. `install-web.sh` generates a strong key on first
+seed when the value is empty, and refuses placeholder / short keys.
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Put it in `/opt/ovbuilder/web/backend/.env` (mode `0600`).
+
+### vSphere password
+
+`POST /api/builds` may accept `vsphere_password` for the worker. The field
+is **omitted** from every job response model and stripped from the stored
+job row. The Celery worker passes it to `ovbuilder` via `VSPHERE_PASSWORD`
+/ `TF_VAR_vsphere_password` / `OVBUILDER_VSPHERE_PASSWORD` — never
+`--vsphere-password` on argv (visible in `ps`). Do not log those env vars.
+
+### LDAP TLS
+
+Certificate verification is **on** by default (`LDAP_SSL_VERIFY=true`).
+Setting it to `false` is an explicit insecure lab opt-in and is logged.
+
+| Setting | Purpose |
+|---------|---------|
+| `LDAP_SERVER_URL` | Prefer `ldaps://ldap.example.com:636` |
+| `LDAP_USE_SSL` | Force LDAPS when the URL is `ldap://` |
+| `LDAP_USE_STARTTLS` | Upgrade `ldap://` with `start_tls()` before bind |
+| `LDAP_SSL_VERIFY` | Verify the server cert (default `true`) |
+| `LDAP_CA_CERTS_FILE` | PEM bundle for a private LDAP CA |
+
+`LDAP_CA_CERTS_FILE` is passed to ldap3 `Tls(ca_certs_file=...)`. Use it
+when the directory is signed by an internal CA that is not in the host
+trust store. Example: `/etc/pki/tls/certs/example-ldap-ca.pem`.

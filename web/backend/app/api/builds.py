@@ -1,60 +1,31 @@
 """Build submission + status polling + cancel.
 
-vSphere credentials are stripped from every response the API returns to the
-browser. They are only ever consumed server-side by the Celery worker.
+vSphere passwords are accepted on submit and handed to the Celery worker.
+They are never persisted on the job row and never appear on API responses.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 
 from ..auth import get_current_user, require_builder
 from ..config import get_settings
 from ..database import get_job, list_jobs, save_job
-from ..models import BuildJob, BuildRequest, BuildStatus, Role, UserOut
+from ..models import (
+    BuildJob,
+    BuildJobPublic,
+    BuildRequest,
+    BuildStatus,
+    Role,
+    UserOut,
+    redact_build_request,
+)
 from ..tasks import celery_app, run_build
 
 router = APIRouter()
-
-
-class BuildJobPublic(BaseModel):
-    """BuildJob with secrets redacted for the browser."""
-    id: str
-    status: BuildStatus
-    request: BuildRequest
-    requested_by: str
-    created_at: datetime
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    celery_task_id: Optional[str] = None
-    log_tail: str = ""
-    error: Optional[str] = None
-    vm_ip: Optional[str] = None
-    vm_name: Optional[str] = None
-
-    @classmethod
-    def from_job(cls, job: BuildJob) -> "BuildJobPublic":
-        req = job.request.model_dump()
-        req["vsphere_password"] = None
-        return cls(
-            id=job.id,
-            status=job.status,
-            request=BuildRequest(**req),
-            requested_by=job.requested_by,
-            created_at=job.created_at,
-            started_at=job.started_at,
-            finished_at=job.finished_at,
-            celery_task_id=job.celery_task_id,
-            log_tail=job.log_tail,
-            error=job.error,
-            vm_ip=job.vm_ip,
-            vm_name=job.vm_name,
-        )
 
 
 @router.post("", response_model=BuildJobPublic, status_code=status.HTTP_202_ACCEPTED)
@@ -74,11 +45,12 @@ async def submit_build(
     job = BuildJob(
         id=str(uuid.uuid4()),
         status=BuildStatus.queued,
-        request=req,
+        request=redact_build_request(req),
         requested_by=user.username,
         created_at=datetime.now(timezone.utc),
     )
     await save_job(job)
+    # Password stays on the Celery payload only — never on the stored job.
     task = run_build.delay(job.id, req.model_dump(), user.username)
     job.celery_task_id = task.id
     await save_job(job)
