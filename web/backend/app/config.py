@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # which is an explicit opt-in to an ephemeral (non-persistent) key.
     secret_key: str = Field(default="")
     access_token_expire_minutes: int = 60 * 8
+    # How long a directory-mapped role may be reused before the next LDAP
+    # group lookup. 0 = re-check on every authenticated request. Local
+    # overrides are always applied immediately and never wait on this TTL.
+    role_cache_ttl_seconds: int = 60
 
     # --- CORS (React dev server + production origin) ------------------------
     cors_origins: list[str] = Field(

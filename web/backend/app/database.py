@@ -1,9 +1,9 @@
-"""SQLAlchemy persistence for build jobs.
+"""SQLAlchemy persistence for build jobs and web-auth users.
 
 The FastAPI process and Celery workers are separate interpreters. Jobs live in
 Postgres so list/detail/create and worker status/log updates share one table.
 
-Two engines, one table:
+Two engines, one schema:
 - async (asyncpg) for the API
 - sync (psycopg) for Celery and Alembic — no asyncio.run() in worker threads
 """
@@ -22,7 +22,15 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 from sqlalchemy.pool import StaticPool
 
 from .config import get_settings
-from .models import BuildJob, BuildRequest, BuildStatus
+from .models import (
+    BuildJob,
+    BuildRequest,
+    BuildStatus,
+    Role,
+    UserAdminOut,
+    coerce_role,
+    effective_role,
+)
 
 _async_engine: Optional[AsyncEngine] = None
 _sync_engine: Optional[Engine] = None
@@ -51,6 +59,23 @@ class JobRow(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     vm_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     vm_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+
+class UserRow(Base):
+    """Persisted identity + last LDAP role + optional local override."""
+
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ldap_role: Mapped[str] = mapped_column(String(16), default="viewer")
+    role_override: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    ldap_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 def database_urls(url: Optional[str] = None) -> tuple[str, str]:
@@ -306,3 +331,106 @@ async def list_jobs(username: Optional[str] = None) -> list[BuildJob]:
             stmt = stmt.where(JobRow.requested_by == username)
         result = await session.execute(stmt)
         return [_to_model(r) for r in result.scalars().all()]
+
+
+# ---------------------------------------------------------------------------
+# Users — LDAP role cache + local overrides
+# ---------------------------------------------------------------------------
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _to_user(row: UserRow) -> UserAdminOut:
+    ldap_role = coerce_role(row.ldap_role)
+    override = coerce_role(row.role_override) if row.role_override else None
+    return UserAdminOut(
+        username=row.username,
+        email=row.email,
+        display_name=row.display_name,
+        ldap_role=ldap_role,
+        role_override=override,
+        role=effective_role(ldap_role, override),
+        ldap_checked_at=_aware(row.ldap_checked_at),
+    )
+
+
+async def get_user(username: str) -> Optional[UserAdminOut]:
+    factory = _async_session()
+    async with factory() as session:
+        row = await session.get(UserRow, username)
+        return _to_user(row) if row else None
+
+
+async def upsert_user(
+    *,
+    username: str,
+    ldap_role: Role,
+    email: Optional[str] = None,
+    display_name: Optional[str] = None,
+    ldap_checked_at: Optional[datetime] = None,
+) -> UserAdminOut:
+    """Create or update the LDAP-mapped fields; never clears a local override."""
+    factory = _async_session()
+    async with factory() as session:
+        row = await session.get(UserRow, username)
+        now = _utcnow()
+        if row is None:
+            row = UserRow(
+                username=username,
+                email=email,
+                display_name=display_name,
+                ldap_role=ldap_role.value,
+                role_override=None,
+                ldap_checked_at=ldap_checked_at,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+        else:
+            row.ldap_role = ldap_role.value
+            if email is not None:
+                row.email = email
+            if display_name is not None:
+                row.display_name = display_name
+            if ldap_checked_at is not None:
+                row.ldap_checked_at = ldap_checked_at
+            row.updated_at = now
+        await session.commit()
+        await session.refresh(row)
+        return _to_user(row)
+
+
+async def set_role_override(username: str, override: Optional[Role]) -> UserAdminOut:
+    """Set or clear a local role override, creating the user row if needed."""
+    factory = _async_session()
+    async with factory() as session:
+        row = await session.get(UserRow, username)
+        now = _utcnow()
+        if row is None:
+            row = UserRow(
+                username=username,
+                email=None,
+                display_name=None,
+                ldap_role=Role.viewer.value,
+                role_override=override.value if override is not None else None,
+                ldap_checked_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+        else:
+            row.role_override = override.value if override is not None else None
+            row.updated_at = now
+        await session.commit()
+        await session.refresh(row)
+        return _to_user(row)
+
+
+async def list_users() -> list[UserAdminOut]:
+    factory = _async_session()
+    async with factory() as session:
+        stmt = select(UserRow).order_by(UserRow.username.asc())
+        result = await session.execute(stmt)
+        return [_to_user(r) for r in result.scalars().all()]
