@@ -50,6 +50,11 @@ def _credentials(settings: Optional[Settings] = None) -> Tuple[str, str, str, st
     return server, user, password, datacenter, bool(ignore_ssl)
 
 
+def configured_datacenter(settings: Optional[Settings] = None) -> str:
+    """Placement datacenter used by live inventory (never a template DC)."""
+    return (_credentials(settings)[3] or "").strip()
+
+
 @contextmanager
 def vsphere_session(settings: Optional[Settings] = None) -> Iterator[Tuple[object, str]]:
     """Yield (service_instance, datacenter_name). Disconnects on exit."""

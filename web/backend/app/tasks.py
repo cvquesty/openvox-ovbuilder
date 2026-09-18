@@ -24,6 +24,7 @@ from .config import get_settings
 from .database import get_job_sync, save_job_sync, update_job_log_sync
 from .models import BuildStatus
 from .notify import notify_job
+from .vsphere_client import configured_datacenter
 
 settings = get_settings()
 
@@ -86,6 +87,9 @@ def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
         cmd += ["--cluster", req["cluster"]]
     if req.get("network"):
         cmd += ["--network", req["network"]]
+    datacenter = configured_datacenter()
+    if datacenter:
+        cmd += ["--datacenter", datacenter]
     for extra in req.get("networks") or []:
         if extra and extra != req.get("network"):
             cmd += ["--network", extra]

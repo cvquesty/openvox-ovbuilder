@@ -30,10 +30,13 @@ module "new_vm" {
 
   provision_mode = "clone"
   vm_name        = "openvox-web03"
-  template_name  = "ovbuilder-almalinux-10"
-  datacenter     = "Main DC"
-  cluster        = "Compute Cluster"
-  vm_datastore   = "vsanDatastore"
+  template_name        = "ovbuilder-almalinux-10"
+  # Optional: golden lives in another DC of the same vCenter.
+  # template_datacenter = "PDXC"
+  datacenter           = "Main DC"
+  cluster              = "Compute Cluster"
+  # compute_type       = "host"   # standalone ESXi; default is "cluster"
+  vm_datastore         = "vsanDatastore"
   networks       = ["VM Production"]
 
   num_cpus     = 4

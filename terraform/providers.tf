@@ -18,18 +18,5 @@ provider "vsphere" {
   allow_unverified_ssl = var.vsphere_allow_unverified_ssl
 }
 
-# -----------------------------------------------------------------------------
-# Optional root-level data sources
-#
-# The ISO VM provisioner module (modules/vm) performs its own lookups,
-# so these are mainly useful if you add other resources at the root level.
-# -----------------------------------------------------------------------------
-
-data "vsphere_datacenter" "dc" {
-  name = var.vsphere_datacenter
-}
-
-data "vsphere_compute_cluster" "cluster" {
-  name          = var.vsphere_cluster
-  datacenter_id = data.vsphere_datacenter.dc.id
-}
+# Inventory lookups live in modules/vm so standalone ESXi hosts (SEA3) are
+# not forced through data.vsphere_compute_cluster at the root module.

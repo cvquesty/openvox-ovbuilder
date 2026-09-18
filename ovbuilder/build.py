@@ -7,7 +7,8 @@ END-TO-END FLOWS
 
 Golden (default)
   1. Discover vSphere inventory (optional interactive menus).
-  2. Select Packer golden OS key (almalinux-10 / ubuntu-24.04).
+  2. Select an ``ovbuilder-*`` golden from live vCenter (name + short label).
+     Template datacenter is resolved silently (cross-DC clone is OK).
   3. Interview: hostname, IP, CIDR, gateway, DNS, sizing.
   4. Terraform clones template + injects cloud-init guestinfo.
   5. Disconnect any leftover CD media (ISO lock hygiene).
@@ -40,6 +41,12 @@ from rich.table import Table
 
 from . import vsphere
 from .cloud_init import guestinfo_extra_config
+from .goldens import (
+    COMPUTE_TYPE_CLUSTER,
+    discover_goldens,
+    goldens_from_config,
+    resolve_os_image,
+)
 from .openvox_site import DEFAULT_SITES, infer_location, site_for
 from .config import OvbuilderConfig, get_config_manager
 from .network import (
@@ -213,6 +220,99 @@ def _prompt_table_choice(
         return names[default_index]
 
 
+def _resolve_golden_and_compute(
+    cfg: OvbuilderConfig,
+    *,
+    vsphere_server: Optional[str],
+    vsphere_user: Optional[str],
+    vsphere_password: Optional[str],
+    os_image: Optional[str],
+    template_name: str,
+    guest_id: str,
+    default_user: str,
+    template_datacenter: str,
+    compute_type: str,
+    cluster_name: Optional[str],
+    datacenter: Optional[str],
+) -> Tuple[str, str, str, str, str]:
+    """
+    Silently resolve golden source DC and cluster-vs-host placement.
+
+    The operator never sees template datacenter or datastore. Live inventory
+    is preferred; config goldens are an offline fallback.
+    """
+    needle = (os_image or template_name or "").strip()
+
+    def _from_config_only() -> Tuple[str, str, str, str, str]:
+        if not needle:
+            return template_name, guest_id, default_user, template_datacenter, compute_type
+        try:
+            chosen = resolve_os_image(needle, [], cfg)
+        except KeyError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        return (
+            chosen.name,
+            guest_id or chosen.guest_id,
+            chosen.default_user or default_user,
+            template_datacenter,
+            compute_type,
+        )
+
+    if not (vsphere_server and vsphere_user and vsphere_password):
+        return _from_config_only()
+
+    si = None
+    try:
+        si = vsphere.connect(vsphere_server, vsphere_user, vsphere_password)
+        live = []
+        try:
+            live = discover_goldens(si, cfg)
+        except Exception as exc:
+            console.print(
+                f"[yellow]Could not list ovbuilder-* templates: {exc}[/yellow]"
+            )
+        if needle:
+            try:
+                chosen = resolve_os_image(needle, live, cfg)
+            except KeyError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1) from exc
+            template_name = chosen.name
+            guest_id = guest_id or chosen.guest_id
+            default_user = chosen.default_user or default_user
+            if chosen.datacenter:
+                template_datacenter = chosen.datacenter
+        if cluster_name:
+            try:
+                compute_type = (
+                    vsphere.classify_compute(
+                        si, datacenter or cfg.datacenter, cluster_name
+                    )
+                    or COMPUTE_TYPE_CLUSTER
+                )
+            except Exception:
+                compute_type = COMPUTE_TYPE_CLUSTER
+        return (
+            template_name,
+            guest_id,
+            default_user,
+            template_datacenter,
+            compute_type,
+        )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        console.print(
+            f"[yellow]Could not resolve golden/host placement from vCenter: "
+            f"{exc}[/yellow]"
+        )
+        return _from_config_only()
+    finally:
+        if si is not None:
+            vsphere.disconnect(si)
+
+
 # ---------------------------------------------------------------------------
 # Main command
 # ---------------------------------------------------------------------------
@@ -226,7 +326,7 @@ def build(
     os_image: Optional[str] = typer.Option(
         None,
         "--os",
-        help="Golden image key (e.g. almalinux-10, ubuntu-24.04)",
+        help="Golden image key or ovbuilder-* template name (e.g. ubuntu-24.04)",
     ),
     iso: Optional[str] = typer.Option(
         None, "--iso", help="ISO path (iso mode only)"
@@ -283,7 +383,7 @@ def build(
         help="Site code (ATLC, PDXC, …). Compiler VIP is chosen from this.",
     ),
     cluster: Optional[str] = typer.Option(
-        None, "--cluster", help="Compute cluster name"
+        None, "--cluster", help="Compute cluster or standalone ESXi host name"
     ),
     network: Optional[List[str]] = typer.Option(
         None,
@@ -302,7 +402,8 @@ def build(
     """
     Build a VM from a Packer golden template (default) or legacy ISO.
 
-    Interactive: select OS → interview (host/IP/CIDR/…) → Terraform apply.
+    Interactive: select OS from live ovbuilder-* templates → interview
+    (host/IP/CIDR/…) → Terraform apply. Template source DC is never prompted.
     """
     # --- Strip OptionInfo sentinels from bare ``ovbuilder`` invoke ----------
     if _is_optioninfo(hostname):
@@ -373,6 +474,8 @@ def build(
 
     # Defaults filled by either interactive or non-interactive branches.
     template_name = ""
+    template_datacenter = ""
+    compute_type = COMPUTE_TYPE_CLUSTER
     guest_id = ""
     default_user = "root"
     iso_path = iso or ""
@@ -418,9 +521,12 @@ def build(
 
         clusters = vsphere.list_clusters(si, dc)
         cluster = (
-            _prompt_table_choice(f"Clusters in {dc}", clusters)
+            _prompt_table_choice(f"Compute in {dc}", clusters)
             if clusters
-            else Prompt.ask("Cluster", default=cfg.cluster)
+            else Prompt.ask("Cluster or host", default=cfg.cluster)
+        )
+        compute_type = (
+            vsphere.classify_compute(si, dc, cluster) or COMPUTE_TYPE_CLUSTER
         )
 
         dss = vsphere.list_datastores(si, dc)
@@ -491,30 +597,42 @@ def build(
 
         # --- OS source: golden template vs ISO ----------------------------
         if provision_mode == "golden":
-            images = list(cfg.golden_images.items())
-            if not images:
+            live = []
+            try:
+                live = discover_goldens(si, cfg)
+            except Exception as exc:
                 console.print(
-                    "[red]No golden_images configured in config.yaml[/red]"
+                    f"[yellow]Could not list ovbuilder-* templates: {exc}[/yellow]"
+                )
+            goldens = live or goldens_from_config(cfg)
+            if not goldens:
+                console.print(
+                    "[red]No ovbuilder-* templates found in vCenter "
+                    "and none configured in config.yaml[/red]"
                 )
                 raise typer.Exit(1)
-            table = Table(title="Packer golden images (OS)")
-            table.add_column("#", style="cyan")
-            table.add_column("Key")
-            table.add_column("Template")
-            table.add_column("Description")
-            for i, (key, gi) in enumerate(images, 1):
-                table.add_row(
-                    str(i), key, gi.template, gi.description or ""
+            if not live:
+                console.print(
+                    "[yellow]Using configured ovbuilder-* goldens "
+                    "(live inventory empty or unavailable).[/yellow]"
                 )
+            table = Table(title="OS templates")
+            table.add_column("#", style="cyan")
+            table.add_column("Name")
+            table.add_column("OS")
+            for i, gi_row in enumerate(goldens, 1):
+                table.add_row(str(i), gi_row.name, gi_row.label)
             console.print(table)
             choice = Prompt.ask("Select OS", default="1")
             try:
-                _os_key, gi = images[int(choice) - 1]
+                chosen = goldens[int(choice) - 1]
             except Exception:
-                _os_key, gi = images[0]
-            template_name = gi.template
-            guest_id = gi.guest_id
-            default_user = gi.default_user
+                chosen = goldens[0]
+            template_name = chosen.name
+            guest_id = chosen.guest_id
+            default_user = chosen.default_user
+            template_datacenter = chosen.datacenter
+            os_image = chosen.key
             console.print(
                 f"[dim]Will clone template [bold]{template_name}[/bold] "
                 f"(login user: {default_user})[/dim]"
@@ -656,19 +774,10 @@ def build(
         if provision_mode == "golden":
             if not os_image:
                 console.print(
-                    "[red]Golden mode requires --os (e.g. almalinux-10)[/red]"
+                    "[red]Golden mode requires --os (e.g. ubuntu-24.04 "
+                    "or ovbuilder-ubuntu-24.04)[/red]"
                 )
                 raise typer.Exit(1)
-            if os_image not in cfg.golden_images:
-                console.print(
-                    f"[red]Unknown --os {os_image!r}. "
-                    f"Configured: {', '.join(cfg.golden_images)}[/red]"
-                )
-                raise typer.Exit(1)
-            gi = cfg.golden_images[os_image]
-            template_name = gi.template
-            guest_id = gi.guest_id
-            default_user = gi.default_user
         else:
             if not iso:
                 console.print("[red]ISO mode requires --iso[/red]")
@@ -695,6 +804,27 @@ def build(
             vm_datastore_cluster=vm_datastore_cluster,
             datacenter=datacenter,
         )
+        if provision_mode == "golden":
+            (
+                template_name,
+                guest_id,
+                default_user,
+                template_datacenter,
+                compute_type,
+            ) = _resolve_golden_and_compute(
+                cfg,
+                vsphere_server=vsphere_server,
+                vsphere_user=vsphere_user,
+                vsphere_password=vsphere_password,
+                os_image=os_image,
+                template_name=template_name,
+                guest_id=guest_id,
+                default_user=default_user,
+                template_datacenter=template_datacenter,
+                compute_type=compute_type,
+                cluster_name=cfg.cluster,
+                datacenter=cfg.datacenter,
+            )
 
     # =====================================================================
     # COMMON: sizing coerce + Terraform apply
@@ -768,6 +898,8 @@ def build(
         "iso_path": iso_path or "",
         "provision_mode": tf_mode,
         "template_name": template_name,
+        "template_datacenter": template_datacenter,
+        "compute_type": compute_type,
         "guest_id": guest_id,
         "guestinfo_extra_config": guestinfo,
         "num_cpus": cpus,

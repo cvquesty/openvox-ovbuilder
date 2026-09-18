@@ -5,6 +5,32 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta31] - 2026-09-18
+
+### Added
+
+- **Silent cross-datacenter golden clones.** CLI `ovbuilder build` and the
+  web OS picker list live vCenter templates whose names match `ovbuilder-*`
+  across **all** datacenters (name + short label only). The source
+  datacenter and datastore are never shown; Terraform clones from
+  `template_datacenter` when it differs from the VM placement DC (SEA3
+  can clone `ovbuilder-ubuntu-24.04` that lives in PDXC).
+- **Standalone ESXi placement.** When the compute picker is a bare host
+  (not a DRS cluster), Terraform uses `vsphere_host` / the host resource
+  pool instead of `vsphere_compute_cluster`. Real clusters keep working
+  for ATLC/PDXC.
+- Duplicate `ovbuilder-*` names collapse to one row (prefer
+  `golden_home_datacenter` / `OVBUILDER_GOLDEN_HOME_DATACENTER`, else
+  newest, else first). Operators are never asked which DC.
+
+### Changed
+
+- Web `/api/inventory/os-images` is live inventory first (config
+  `ovbuilder-*` goldens only if vCenter is unreachable). Successful empty
+  scans return an empty list.
+- Root Terraform no longer looks up `vsphere_compute_cluster` at apply
+  time (that broke SEA3 standalone hosts even when the VM module was unused).
+
 ## [0.97-beta30] - 2026-09-18
 
 ### Changed
