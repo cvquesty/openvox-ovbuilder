@@ -7,21 +7,36 @@ from typing import Any
 
 from .config import get_settings
 from .models import BuildJob, BuildStatus
+from .runtime_settings import load_runtime_settings
 
 logger = logging.getLogger(__name__)
 
 
 def notify_job(job: BuildJob) -> None:
-    settings = get_settings()
-    url = (settings.notify_webhook_url or "").strip()
+    env = get_settings()
+    try:
+        rt = load_runtime_settings()
+    except Exception:
+        logger.debug("runtime settings unavailable for notify", exc_info=True)
+        rt = None
+
+    url = ((rt.notify_webhook_url if rt else "") or env.notify_webhook_url or "").strip()
     if not url:
         return
-    if job.status == BuildStatus.succeeded and not settings.notify_on_success:
+
+    on_success = rt.notify_on_success if rt is not None else env.notify_on_success
+    on_failure = rt.notify_on_failure if rt is not None else env.notify_on_failure
+    on_cancelled = rt.notify_on_cancelled if rt is not None else True
+
+    if job.status == BuildStatus.succeeded and not on_success:
         return
-    if job.status == BuildStatus.failed and not settings.notify_on_failure:
+    if job.status == BuildStatus.failed and not on_failure:
+        return
+    if job.status == BuildStatus.cancelled and not on_cancelled:
         return
     if job.status not in (BuildStatus.succeeded, BuildStatus.failed, BuildStatus.cancelled):
         return
+
     payload: dict[str, Any] = {
         "text": (
             f"OV Builder {job.status.value}: {job.request.hostname} "

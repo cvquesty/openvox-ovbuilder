@@ -187,6 +187,10 @@ export interface RuntimeSettings {
   vsphere_datacenter: string;
   vsphere_ignore_ssl: boolean;
   npm_registry: string;
+  notify_webhook_set: boolean;
+  notify_on_success: boolean;
+  notify_on_failure: boolean;
+  notify_on_cancelled: boolean;
 }
 
 export interface RuntimeSettingsUpdate {
@@ -197,6 +201,11 @@ export interface RuntimeSettingsUpdate {
   vsphere_datacenter?: string;
   vsphere_ignore_ssl?: boolean;
   npm_registry?: string;
+  /** Omit or undefined to leave unchanged; empty string clears. */
+  notify_webhook_url?: string;
+  notify_on_success?: boolean;
+  notify_on_failure?: boolean;
+  notify_on_cancelled?: boolean;
 }
 
 export const settings = {

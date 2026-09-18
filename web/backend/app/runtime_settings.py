@@ -1,8 +1,8 @@
-"""Persisted admin runtime settings (vSphere + package registries).
+"""Persisted admin runtime settings (vSphere, registries, notifications).
 
 Stored as JSON under OVBUILDER_DATA_DIR (default: ~/.local/share/ovbuilder/web)
-with mode 0600. Secrets are never returned by the API layer — only a boolean
-flag indicating whether a password is set.
+with mode 0600. Secrets are never returned by the API — only booleans indicating
+whether a secret is set.
 """
 
 from __future__ import annotations
@@ -42,6 +42,10 @@ class RuntimeSettings(BaseModel):
     vsphere_datacenter: str = ""
     vsphere_ignore_ssl: bool = True
     npm_registry: str = "https://registry.npmjs.org/"
+    notify_webhook_url: str = ""
+    notify_on_success: bool = True
+    notify_on_failure: bool = True
+    notify_on_cancelled: bool = True
 
 
 class RuntimeSettingsPublic(BaseModel):
@@ -51,6 +55,10 @@ class RuntimeSettingsPublic(BaseModel):
     vsphere_datacenter: str = ""
     vsphere_ignore_ssl: bool = True
     npm_registry: str = "https://registry.npmjs.org/"
+    notify_webhook_set: bool = False
+    notify_on_success: bool = True
+    notify_on_failure: bool = True
+    notify_on_cancelled: bool = True
 
 
 class RuntimeSettingsUpdate(BaseModel):
@@ -61,6 +69,13 @@ class RuntimeSettingsUpdate(BaseModel):
     vsphere_datacenter: Optional[str] = None
     vsphere_ignore_ssl: Optional[bool] = None
     npm_registry: Optional[str] = None
+    notify_webhook_url: Optional[str] = Field(default=None)
+    notify_on_success: Optional[bool] = None
+    notify_on_failure: Optional[bool] = None
+    notify_on_cancelled: Optional[bool] = None
+
+
+_SECRET_KEYS = frozenset({"vsphere_password", "notify_webhook_url"})
 
 
 def _ensure_dir(path: Path) -> None:
@@ -109,6 +124,10 @@ def to_public(cfg: RuntimeSettings) -> RuntimeSettingsPublic:
         vsphere_datacenter=cfg.vsphere_datacenter,
         vsphere_ignore_ssl=cfg.vsphere_ignore_ssl,
         npm_registry=cfg.npm_registry or "https://registry.npmjs.org/",
+        notify_webhook_set=bool(cfg.notify_webhook_url),
+        notify_on_success=cfg.notify_on_success,
+        notify_on_failure=cfg.notify_on_failure,
+        notify_on_cancelled=cfg.notify_on_cancelled,
     )
 
 
@@ -118,7 +137,7 @@ def update_runtime_settings(patch: RuntimeSettingsUpdate) -> RuntimeSettings:
         data: Dict[str, Any] = current.model_dump()
         payload = patch.model_dump(exclude_unset=True)
         for key, value in payload.items():
-            if key == "vsphere_password":
+            if key in _SECRET_KEYS:
                 if value is None:
                     continue
                 data[key] = value

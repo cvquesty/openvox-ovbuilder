@@ -27,6 +27,10 @@ type FormValues = {
   vsphere_datacenter: string;
   vsphere_ignore_ssl: boolean;
   npm_registry: string;
+  notify_webhook_url: string;
+  notify_on_success: boolean;
+  notify_on_failure: boolean;
+  notify_on_cancelled: boolean;
 };
 
 export function SettingsPage() {
@@ -34,6 +38,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [passwordSet, setPasswordSet] = useState(false);
+  const [webhookSet, setWebhookSet] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
 
   const form = useForm<FormValues>({
@@ -44,13 +49,13 @@ export function SettingsPage() {
       vsphere_datacenter: '',
       vsphere_ignore_ssl: true,
       npm_registry: 'https://registry.npmjs.org/',
+      notify_webhook_url: '',
+      notify_on_success: true,
+      notify_on_failure: true,
+      notify_on_cancelled: true,
     },
     validate: {
-      vsphere_server: (v) => {
-        const t = (v || '').trim();
-        if (!t) return 'vSphere server is required';
-        return null;
-      },
+      vsphere_server: (v) => ((v || '').trim() ? null : 'vSphere server is required'),
       npm_registry: (v) => {
         const t = (v || '').trim();
         if (!t) return 'npm registry URL is required';
@@ -62,6 +67,17 @@ export function SettingsPage() {
         }
         return null;
       },
+      notify_webhook_url: (v) => {
+        const t = (v || '').trim();
+        if (!t) return null;
+        try {
+          const u = new URL(t);
+          if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'Use http:// or https://';
+        } catch {
+          return 'Enter a valid webhook URL';
+        }
+        return null;
+      },
     },
   });
 
@@ -70,6 +86,7 @@ export function SettingsPage() {
       .get()
       .then((data) => {
         setPasswordSet(data.vsphere_password_set);
+        setWebhookSet(data.notify_webhook_set);
         form.setValues({
           vsphere_server: data.vsphere_server || '',
           vsphere_user: data.vsphere_user || '',
@@ -77,6 +94,10 @@ export function SettingsPage() {
           vsphere_datacenter: data.vsphere_datacenter || '',
           vsphere_ignore_ssl: data.vsphere_ignore_ssl,
           npm_registry: data.npm_registry || 'https://registry.npmjs.org/',
+          notify_webhook_url: '',
+          notify_on_success: data.notify_on_success,
+          notify_on_failure: data.notify_on_failure,
+          notify_on_cancelled: data.notify_on_cancelled,
         });
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load settings'))
@@ -97,15 +118,18 @@ export function SettingsPage() {
       vsphere_datacenter: values.vsphere_datacenter.trim(),
       vsphere_ignore_ssl: values.vsphere_ignore_ssl,
       npm_registry: values.npm_registry.trim(),
+      notify_on_success: values.notify_on_success,
+      notify_on_failure: values.notify_on_failure,
+      notify_on_cancelled: values.notify_on_cancelled,
     };
-    // Only send password when the admin typed something (or cleared intentionally).
-    if (values.vsphere_password !== '') {
-      body.vsphere_password = values.vsphere_password;
-    }
+    if (values.vsphere_password !== '') body.vsphere_password = values.vsphere_password;
+    if (values.notify_webhook_url !== '') body.notify_webhook_url = values.notify_webhook_url.trim();
     try {
       const saved = await settings.update(body);
       setPasswordSet(saved.vsphere_password_set);
+      setWebhookSet(saved.notify_webhook_set);
       form.setFieldValue('vsphere_password', '');
+      form.setFieldValue('notify_webhook_url', '');
       notifications.show({
         title: 'Settings saved',
         message: 'Configuration updated for OV Builder.',
@@ -135,7 +159,8 @@ export function SettingsPage() {
           <Title order={2}>Configuration</Title>
         </Group>
         <Text c="dimmed" size="sm">
-          Admin-only settings for vSphere, package registries, and local role overrides. Passwords are stored on the server and never returned to the browser.
+          Admin-only settings for vSphere, package registries, notifications, and local role
+          overrides. Secrets are stored on the server and never returned to the browser.
         </Text>
       </div>
 
@@ -146,8 +171,8 @@ export function SettingsPage() {
           color="red"
           icon={<IconAlertCircle size={16} />}
           title="Could not save"
-          onClose={() => setError(null)}
           withCloseButton
+          onClose={() => setError(null)}
         >
           {error}
         </Alert>
@@ -160,7 +185,8 @@ export function SettingsPage() {
               vSphere / VMware
             </Title>
             <Text size="sm" c="dimmed" mb="md">
-              Used by inventory and VM lifecycle actions. Leave the password blank to keep the current value.
+              Used by inventory and VM lifecycle actions. Leave the password blank to keep the
+              current value.
             </Text>
             <Stack gap="sm">
               <TextInput
@@ -201,7 +227,8 @@ export function SettingsPage() {
               Package resources
             </Title>
             <Text size="sm" c="dimmed" mb="md">
-              Prefer the public npm registry unless you intentionally use a private mirror reachable from this host and CI.
+              Prefer the public npm registry unless you intentionally use a private mirror
+              reachable from this host and CI.
             </Text>
             <TextInput
               label="npm registry URL"
@@ -209,6 +236,43 @@ export function SettingsPage() {
               autoComplete="off"
               {...form.getInputProps('npm_registry')}
             />
+          </Card>
+
+          <Card withBorder padding="lg" radius="md">
+            <Title order={4} mb="xs">
+              Notifications
+            </Title>
+            <Text size="sm" c="dimmed" mb="md">
+              Optional Slack-compatible webhook. The URL is stored on the server and never shown
+              again after save.
+            </Text>
+            <Stack gap="sm">
+              <PasswordInput
+                label="Webhook URL"
+                placeholder={
+                  webhookSet ? '••••••••  (leave blank to keep)' : 'https://hooks.slack.com/services/…'
+                }
+                description={
+                  webhookSet
+                    ? 'A webhook is already stored. Paste a new URL to replace it, or clear via API with an empty string.'
+                    : 'Slack incoming webhook or any endpoint that accepts {"text": "…"} JSON.'
+                }
+                autoComplete="off"
+                {...form.getInputProps('notify_webhook_url')}
+              />
+              <Switch
+                label="Notify on success"
+                {...form.getInputProps('notify_on_success', { type: 'checkbox' })}
+              />
+              <Switch
+                label="Notify on failure"
+                {...form.getInputProps('notify_on_failure', { type: 'checkbox' })}
+              />
+              <Switch
+                label="Notify on cancel"
+                {...form.getInputProps('notify_on_cancelled', { type: 'checkbox' })}
+              />
+            </Stack>
           </Card>
 
           <Divider />
