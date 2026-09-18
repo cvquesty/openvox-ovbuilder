@@ -157,7 +157,7 @@ async def test_me_uses_override_not_jwt_role(client, monkeypatch):
         return {"username": username, "groups": ["ovbuilder-viewers"]}
 
     monkeypatch.setattr("app.auth.ldap_lookup_user", _ldap)
-    res = await client.get("/api/auth/me", headers=auth_header("alice", Role.viewer))
+    res = client.get("/api/auth/me", headers=auth_header("alice", Role.viewer))
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["username"] == "alice"
@@ -176,7 +176,7 @@ async def test_me_reflects_ldap_revocation_on_stale_admin_token(client, monkeypa
         return {"username": username, "groups": []}
 
     monkeypatch.setattr("app.auth.ldap_lookup_user", _ldap)
-    res = await client.get("/api/auth/me", headers=auth_header("bob", Role.admin))
+    res = client.get("/api/auth/me", headers=auth_header("bob", Role.admin))
     assert res.status_code == 200, res.text
     assert res.json()["role"] == "viewer"
 
@@ -191,7 +191,7 @@ async def test_login_honors_existing_override(client, monkeypatch):
         return None
 
     monkeypatch.setattr("app.api.auth.ldap_authenticate", _auth)
-    res = await client.post(
+    res = client.post(
         "/api/auth/login",
         data={"username": "root", "password": "correct-horse"},
     )
@@ -216,7 +216,7 @@ async def test_admin_set_and_clear_override(client, monkeypatch):
     )
     headers = auth_header("admin", Role.admin)
 
-    created = await client.put(
+    created = client.put(
         "/api/auth/users/newbie",
         headers=headers,
         json={"role_override": "builder"},
@@ -226,13 +226,13 @@ async def test_admin_set_and_clear_override(client, monkeypatch):
     assert created.json()["role_override"] == "builder"
     assert created.json()["role"] == "builder"
 
-    listed = await client.get("/api/auth/users", headers=headers)
+    listed = client.get("/api/auth/users", headers=headers)
     assert listed.status_code == 200
     names = {u["username"] for u in listed.json()}
     assert "newbie" in names
     assert "admin" in names
 
-    cleared = await client.put(
+    cleared = client.put(
         "/api/auth/users/newbie",
         headers=headers,
         json={"role_override": None},
@@ -255,7 +255,7 @@ async def test_viewer_cannot_set_override(client, monkeypatch):
         "app.auth.ldap_lookup_user",
         lambda *_a, **_k: {"username": "viewer", "groups": ["ovbuilder-viewers"]},
     )
-    res = await client.put(
+    res = client.put(
         "/api/auth/users/alice",
         headers=auth_header("viewer", Role.viewer),
         json={"role_override": "admin"},
@@ -270,7 +270,7 @@ async def test_require_admin_follows_resolved_role_not_jwt(client, monkeypatch):
         "app.auth.ldap_lookup_user",
         lambda *_a, **_k: {"username": "promoted", "groups": ["ovbuilder-viewers"]},
     )
-    res = await client.get("/api/auth/users", headers=auth_header("promoted", Role.viewer))
+    res = client.get("/api/auth/users", headers=auth_header("promoted", Role.viewer))
     assert res.status_code == 200
 
 
