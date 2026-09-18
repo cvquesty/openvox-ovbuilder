@@ -16,6 +16,7 @@ This guide covers **macOS, Linux, and Windows**.
 | Packer vCenter + golden password | `packer/variables.auto.pkrvars.hcl` (gitignored) | `packer build` |
 | vSphere password for ovbuilder | CLI prompt, env (`VSPHERE_PASSWORD` / `OVBUILDER_VSPHERE_PASSWORD` / `TF_VAR_vsphere_password`), or `secrets.env`. Avoid `--vsphere-password` (visible in `ps`) | Terraform + web worker |
 | vSphere password for the web app | `/opt/ovbuilder/web/backend/.env` (`VSPHERE_PASSWORD` or `OVBUILDER_VSPHERE_PASSWORD`) or the admin Configuration page | Live inventory + VM lifecycle |
+| vSphere password on a submitted build | Postgres `build_jobs.request` JSON (in-flight jobs). Never in Celery/Redis task args or API responses | Celery worker |
 | Web API JWT secret | `web/backend/.env` `SECRET_KEY` (required unless `DEBUG=true`) | FastAPI |
 | LDAP TLS CA | `LDAP_CA_CERTS_FILE` PEM path | Web LDAP bind |
 

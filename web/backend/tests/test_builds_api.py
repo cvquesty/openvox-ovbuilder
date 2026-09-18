@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import get_current_user, require_builder
+from app.config import get_settings
 from app.database import get_job_sync, save_job_sync
 from app.main import app
 from app.models import BuildJob, BuildRequest, BuildStatus, Role, UserOut
@@ -17,6 +18,9 @@ from tests.placeholders import placeholder_value
 
 class _FakeTask:
     id = "celery-task-1"
+
+
+_delay_calls: list[tuple] = []
 
 
 def _user(username: str, role: Role):
@@ -28,7 +32,13 @@ def _user(username: str, role: Role):
 
 @pytest.fixture
 def api(job_db, monkeypatch):
-    monkeypatch.setattr("app.api.builds.run_build.delay", lambda *a, **k: _FakeTask())
+    _delay_calls.clear()
+
+    def _delay(*args, **kwargs):
+        _delay_calls.append((args, kwargs))
+        return _FakeTask()
+
+    monkeypatch.setattr("app.api.builds.run_build.delay", _delay)
     app.dependency_overrides[get_current_user] = _user("alice", Role.builder)
     app.dependency_overrides[require_builder] = _user("alice", Role.builder)
     with TestClient(app) as client:
@@ -54,7 +64,9 @@ def test_create_list_detail_redact_password(api):
 
     stored = get_job_sync(job_id)
     assert stored is not None
-    assert stored.request.vsphere_password is None
+    # Worker loads credentials from Postgres; the API response still omits them.
+    assert stored.request.vsphere_password == payload["vsphere_password"]
+    assert _delay_calls == [((job_id,), {})]
 
     listed = api.get("/api/builds")
     assert listed.status_code == 200
@@ -122,3 +134,29 @@ def test_admin_lists_all_jobs(job_db):
         assert {row["requested_by"] for row in listed.json()} == {"bob"}
     finally:
         app.dependency_overrides.clear()
+
+
+def test_global_queue_depth_returns_429(api, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_concurrent_builds", 1)
+    monkeypatch.setattr(settings, "max_queue_depth", 0)
+    monkeypatch.setattr(settings, "max_queued_per_user", 10)
+    payload = {"hostname": "web01", "ip": "10.0.0.8", "os_image": "ubuntu-24.04"}
+    first = api.post("/api/builds", json=payload)
+    assert first.status_code == 202, first.text
+    second = api.post("/api/builds", json={"hostname": "web02", "ip": "10.0.0.9", "os_image": "ubuntu-24.04"})
+    assert second.status_code == 429
+    assert "queue is full" in second.json()["detail"]
+
+
+def test_per_user_queue_cap_returns_429(api, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_queued_per_user", 1)
+    monkeypatch.setattr(settings, "max_concurrent_builds", 8)
+    monkeypatch.setattr(settings, "max_queue_depth", 32)
+    payload = {"hostname": "web01", "ip": "10.0.0.8", "os_image": "ubuntu-24.04"}
+    first = api.post("/api/builds", json=payload)
+    assert first.status_code == 202, first.text
+    second = api.post("/api/builds", json={"hostname": "web02", "ip": "10.0.0.9", "os_image": "ubuntu-24.04"})
+    assert second.status_code == 429
+    assert "active builds" in second.json()["detail"]

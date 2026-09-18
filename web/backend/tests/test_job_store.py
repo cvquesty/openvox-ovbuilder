@@ -11,7 +11,10 @@ from sqlalchemy import inspect
 from app.config import get_settings
 from app.database import (
     Base,
+    active_job_counts,
     configure_database,
+    count_jobs,
+    count_jobs_sync,
     database_urls,
     dispose_database,
     get_job,
@@ -19,12 +22,13 @@ from app.database import (
     get_sync_engine,
     list_jobs,
     list_jobs_sync,
+    postgres_pool_kwargs,
     run_alembic_upgrade,
     save_job,
     save_job_sync,
     update_job_log_sync,
 )
-from app.models import BuildJob, BuildRequest, BuildStatus, redact_build_request
+from app.models import ACTIVE_BUILD_STATUSES, BuildJob, BuildRequest, BuildStatus
 from tests.placeholders import placeholder_value
 
 
@@ -32,13 +36,11 @@ def _job(**kwargs) -> BuildJob:
     data = dict(
         id=str(uuid.uuid4()),
         status=BuildStatus.queued,
-        request=redact_build_request(
-            BuildRequest(
-                hostname="web01",
-                ip="10.0.0.8",
-                os_image="ubuntu-24.04",
-                vsphere_password=placeholder_value(),
-            )
+        request=BuildRequest(
+            hostname="web01",
+            ip="10.0.0.8",
+            os_image="ubuntu-24.04",
+            vsphere_password=placeholder_value(),
         ),
         requested_by="alice",
         created_at=datetime.now(timezone.utc),
@@ -70,8 +72,8 @@ def test_sync_save_get_list(job_db):
     assert loaded is not None
     assert loaded.status == BuildStatus.queued
     assert loaded.request.hostname == "web01"
-    # API redacts before persist; the worker gets the password on the Celery payload only.
-    assert loaded.request.vsphere_password is None
+    # Worker loads credentials from the job row; API responses still redact.
+    assert loaded.request.vsphere_password == placeholder_value()
     listed = list_jobs_sync(username="alice")
     assert [j.id for j in listed] == [job.id]
     assert list_jobs_sync(username="bob") == []
@@ -126,3 +128,24 @@ def test_alembic_upgrade_creates_build_jobs(tmp_path, monkeypatch):
     finally:
         dispose_database()
         get_settings.cache_clear()
+
+
+def test_postgres_pool_kwargs_match_api_and_worker():
+    api = postgres_pool_kwargs(pool_size=5, max_overflow=10)
+    assert api == {"pool_size": 5, "max_overflow": 10, "pool_pre_ping": True}
+    worker = postgres_pool_kwargs(pool_size=2, max_overflow=2)
+    assert worker["pool_size"] == 2
+    assert worker["max_overflow"] == 2
+    assert worker["pool_pre_ping"] is True
+
+
+def test_count_jobs_filters_active_status(job_db):
+    save_job_sync(_job(status=BuildStatus.queued))
+    save_job_sync(_job(status=BuildStatus.running, requested_by="bob"))
+    save_job_sync(_job(status=BuildStatus.succeeded))
+    assert count_jobs_sync(statuses=ACTIVE_BUILD_STATUSES) == 2
+    assert count_jobs_sync(username="alice", statuses=ACTIVE_BUILD_STATUSES) == 1
+    assert asyncio.run(count_jobs(statuses=ACTIVE_BUILD_STATUSES)) == 2
+    counts = asyncio.run(active_job_counts())
+    assert counts[BuildStatus.queued.value] == 1
+    assert counts[BuildStatus.running.value] == 1

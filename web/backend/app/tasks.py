@@ -2,6 +2,9 @@
 
 Each submitted build becomes an independent Celery task so multiple operators
 can build at once without colliding on Terraform state or vCenter sessions.
+
+The task takes only ``job_id``. The worker loads the request (including
+vSphere credentials) from Postgres so Redis never sees the password.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -43,7 +47,21 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
+# Batch log writes and cancel polls off the per-line path.
 _LOG_PERSIST_INTERVAL = 25
+_LOG_PERSIST_SECONDS = 2.0
+_STATUS_POLL_INTERVAL = 25
+_STATUS_POLL_SECONDS = 2.0
+
+
+def _should_flush_logs(lines_since: int, elapsed: float, *, status_changed: bool = False) -> bool:
+    """Persist logs every N lines, every ~2s, or when status changes."""
+    return status_changed or lines_since >= _LOG_PERSIST_INTERVAL or elapsed >= _LOG_PERSIST_SECONDS
+
+
+def _should_poll_status(lines_since: int, elapsed: float) -> bool:
+    """Read cancel/status from Postgres every N lines or ~2s, not per line."""
+    return lines_since >= _STATUS_POLL_INTERVAL or elapsed >= _STATUS_POLL_SECONDS
 
 
 def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
@@ -111,8 +129,8 @@ def _mark_cancelled(job, log_lines: Optional[list[str]] = None):
     return {"job_id": job.id, "status": job.status.value}
 
 
-@celery_app.task(name="ovbuilder.run_build", bind=True)
-def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict[str, Any]:
+@celery_app.task(name="ovbuilder.run_build", bind=True, ignore_result=True)
+def run_build(self, job_id: str) -> Dict[str, Any]:
     job = get_job_sync(job_id)
     if job is None:
         return {"job_id": job_id, "status": "missing"}
@@ -120,6 +138,7 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
     if job.status in (BuildStatus.cancelled, BuildStatus.cancelling):
         return _mark_cancelled(job)
 
+    req = job.request.model_dump()
     job.status = BuildStatus.running
     job.started_at = datetime.now(timezone.utc)
     job.celery_task_id = self.request.id
@@ -128,6 +147,9 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
     cmd, env_vars = _build_command(req, job_id)
     log_lines: list[str] = []
     lines_since_persist = 0
+    lines_since_poll = 0
+    last_persist = time.monotonic()
+    last_poll = 0.0  # force a status read on the first stdout line
     proc = None
     rc = 1
 
@@ -142,26 +164,40 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
         )
         assert proc.stdout is not None
         for line in proc.stdout:
-            latest = get_job_sync(job_id)
-            if latest is not None and latest.status in (BuildStatus.cancelled, BuildStatus.cancelling):
-                proc.terminate()
-                try:
-                    proc.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                job = latest
-                return _mark_cancelled(job, log_lines)
-
             log_lines.append(line.rstrip("\n"))
             if len(log_lines) > 200:
                 log_lines = log_lines[-200:]
             job.log_tail = "\n".join(log_lines)
             lines_since_persist += 1
-            if lines_since_persist >= _LOG_PERSIST_INTERVAL:
+            lines_since_poll += 1
+            now = time.monotonic()
+
+            if _should_poll_status(lines_since_poll, now - last_poll):
+                latest = get_job_sync(job_id)
+                last_poll = now
+                lines_since_poll = 0
+                if latest is not None and latest.status in (
+                    BuildStatus.cancelled,
+                    BuildStatus.cancelling,
+                ):
+                    if _should_flush_logs(
+                        lines_since_persist, now - last_persist, status_changed=True
+                    ):
+                        update_job_log_sync(job_id, job.log_tail)
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    job = latest
+                    return _mark_cancelled(job, log_lines)
+
+            if _should_flush_logs(lines_since_persist, now - last_persist):
                 # Log-only write: a full-row save would clobber cancel status
                 # set by the API in another process.
                 update_job_log_sync(job_id, job.log_tail)
                 lines_since_persist = 0
+                last_persist = now
         rc = proc.wait()
     except FileNotFoundError:
         job.status = BuildStatus.failed
@@ -177,6 +213,9 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
         save_job_sync(job)
         notify_job(job)
         return {"job_id": job_id, "status": job.status.value, "error": job.error}
+
+    if lines_since_persist:
+        update_job_log_sync(job_id, job.log_tail)
 
     latest = get_job_sync(job_id)
     if latest is not None and latest.status in (BuildStatus.cancelled, BuildStatus.cancelling):

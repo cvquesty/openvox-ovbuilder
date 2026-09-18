@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     max_concurrent_builds: int = 4
     build_time_limit_seconds: int = 60 * 60
     max_queued_per_user: int = 8
+    # Host-wide backpressure: submit is 429 when queued+running reaches
+    # max_concurrent_builds + max_queue_depth.
+    max_queue_depth: int = 32
+
+    # --- SQLAlchemy pools (Postgres only; sqlite tests use StaticPool) ------
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    worker_db_pool_size: int = 2
+    worker_db_max_overflow: int = 2
 
     # --- vSphere (web worker / inventory / lifecycle) ----------------------
     # Used by vsphere_client.py. Empty strings fall back to the CLI config.

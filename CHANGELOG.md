@@ -5,6 +5,30 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta30] - 2026-09-18
+
+### Changed
+
+- **Web workers use a real sync SQLAlchemy engine.** Celery no longer needs an
+  asyncio bridge: `get_job_sync` / `save_job_sync` talk to Postgres via
+  psycopg. API pool is `pool_size=5` / `max_overflow=10`; workers use
+  `pool_size=2` / `max_overflow=2`; both set `pool_pre_ping=True`.
+- **Build tasks take only `job_id`.** The worker loads the request (including
+  `vsphere_password`) from Postgres. Redis never sees credentials.
+  `task_ignore_result=True` — the API owns job state.
+- **Cancel/status polls are throttled** to every 25 log lines or ~2s, not once
+  per stdout line. Log persistence still batches every 25 lines and also
+  flushes on a 2s floor or a status change.
+- **Host-wide queue depth.** `MAX_QUEUE_DEPTH` (default 32) plus
+  `MAX_CONCURRENT_BUILDS` caps queued+running jobs; submit returns 429 when
+  full. Per-user `MAX_QUEUED_PER_USER` is unchanged.
+- **`GET /api/health`** reports `db_ok`, queued/running/active counts, and the
+  queue caps. HTTP 200 stays a process liveness signal; `status` is
+  `degraded` if Postgres is unreachable.
+
+No Alembic revision: `build_jobs.request` JSON already stores the worker
+payload. sqlite tests still use `create_all`.
+
 ## [0.97-beta29] - 2026-09-18
 
 ### Security

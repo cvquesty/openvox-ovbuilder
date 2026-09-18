@@ -258,9 +258,20 @@ restarts.
 | Celery / Alembic driver | `postgresql+psycopg://` (derived automatically from the same URL) |
 
 Plain `postgresql://` and `postgresql+psycopg://` URLs are accepted; the app
-normalizes them. Do not put secrets in the URL in committed files. Stored
-`request` JSON is redacted (`vsphere_password` cleared); the worker receives
-the password only on the Celery task payload.
+normalizes them. Do not put secrets in the URL in committed files.
+
+The API uses an async SQLAlchemy engine (`pool_size=5`, `max_overflow=10`,
+`pool_pre_ping=True`). Celery workers use a **sync** engine derived from the
+same URL (`asyncpg` → `psycopg`) with a smaller pool (`pool_size=2`,
+`max_overflow=2`). Workers never call `asyncio.run()` to touch the database.
+
+Submitted `request` JSON **includes** `vsphere_password` so the worker can load
+the job by id. `GET`/`POST` job responses still use `BuildJobPublic` and omit
+the field. Redis/Celery task args are `job_id` only.
+
+Postgres schema is managed with Alembic (see below). sqlite unit tests call
+`create_all` so they do not need a migration runner; `init_db()` does the same
+when `DATABASE_URL` is sqlite.
 
 ### Migrations
 
@@ -300,7 +311,7 @@ workers do not share a state file. Do not run bare `terraform apply` inside
 
 ## API surface
 
-- `GET /api/health` — liveness
+- `GET /api/health` — liveness plus `db_ok`, queued/running/active counts, and queue caps
 - `POST /api/auth/login` — OAuth2 form
 - `GET /api/auth/me` — current user with the **live** effective role
 - `GET /api/auth/users` — admin: list users, LDAP roles, overrides
@@ -337,11 +348,17 @@ Put it in `/opt/ovbuilder/web/backend/.env` (mode `0600`).
 
 ### vSphere password
 
-`POST /api/builds` may accept `vsphere_password` for the worker. The field
-is **omitted** from every job response model and stripped from the stored
-job row. The Celery worker passes it to `ovbuilder` via `VSPHERE_PASSWORD`
-/ `TF_VAR_vsphere_password` / `OVBUILDER_VSPHERE_PASSWORD` — never
-`--vsphere-password` on argv (visible in `ps`). Do not log those env vars.
+`POST /api/builds` may accept `vsphere_password` for the worker. The field is
+stored on the job row so Celery can take **only** `job_id` (nothing secret in
+the Redis broker payload). It is **omitted** from every job response model
+(`BuildJobPublic` / `BuildRequestPublic`). The worker passes it to `ovbuilder`
+via `VSPHERE_PASSWORD` / `TF_VAR_vsphere_password` / `OVBUILDER_VSPHERE_PASSWORD`
+— never `--vsphere-password` on argv (visible in `ps`). Do not log those env
+vars. Restrict Postgres access the same way you restrict `.env`.
+
+Submit is rejected with HTTP 429 when the caller already has
+`MAX_QUEUED_PER_USER` queued+running jobs, or when the host-wide total reaches
+`MAX_CONCURRENT_BUILDS + MAX_QUEUE_DEPTH`.
 
 ### LDAP TLS
 

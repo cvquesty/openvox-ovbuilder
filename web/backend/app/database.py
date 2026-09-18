@@ -13,9 +13,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
-from sqlalchemy import JSON, DateTime, String, Text, create_engine, select
+from sqlalchemy import JSON, DateTime, String, Text, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -23,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 
 from .config import get_settings
 from .models import (
+    ACTIVE_BUILD_STATUSES,
     BuildJob,
     BuildRequest,
     BuildStatus,
@@ -99,6 +100,15 @@ def _is_sqlite(url: str) -> bool:
     return url.split("://", 1)[0].startswith("sqlite")
 
 
+def postgres_pool_kwargs(*, pool_size: int, max_overflow: int) -> dict:
+    """Explicit QueuePool knobs for Postgres engines (API vs Celery)."""
+    return {
+        "pool_size": pool_size,
+        "max_overflow": max_overflow,
+        "pool_pre_ping": True,
+    }
+
+
 def configure_database(database_url: Optional[str] = None) -> None:
     """Create (or recreate) the async and sync engines.
 
@@ -107,10 +117,20 @@ def configure_database(database_url: Optional[str] = None) -> None:
     global _async_engine, _sync_engine, _async_session_factory, _sync_session_factory
     dispose_database()
 
+    settings = get_settings()
     async_url, sync_url = database_urls(database_url)
-    echo = get_settings().debug
+    echo = settings.debug
 
-    async_kwargs: dict = {"echo": echo, "pool_pre_ping": not _is_sqlite(async_url)}
+    async_kwargs: dict = {"echo": echo}
+    if _is_sqlite(async_url):
+        async_kwargs["pool_pre_ping"] = False
+    else:
+        async_kwargs.update(
+            postgres_pool_kwargs(
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+            )
+        )
     _async_engine = create_async_engine(async_url, **async_kwargs)
 
     sync_kwargs: dict = {"echo": echo}
@@ -120,7 +140,12 @@ def configure_database(database_url: Optional[str] = None) -> None:
         # when tests use a shared sqlite file (and :memory:).
         sync_kwargs["poolclass"] = StaticPool
     else:
-        sync_kwargs["pool_pre_ping"] = True
+        sync_kwargs.update(
+            postgres_pool_kwargs(
+                pool_size=settings.worker_db_pool_size,
+                max_overflow=settings.worker_db_max_overflow,
+            )
+        )
     _sync_engine = create_engine(sync_url, **sync_kwargs)
 
     _async_session_factory = async_sessionmaker(
@@ -260,6 +285,25 @@ async def init_db() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _status_values(statuses: Optional[Sequence[BuildStatus | str]]) -> Optional[tuple[str, ...]]:
+    if statuses is None:
+        return None
+    return tuple(s.value if isinstance(s, BuildStatus) else str(s) for s in statuses)
+
+
+def _count_jobs_stmt(
+    username: Optional[str] = None,
+    statuses: Optional[Sequence[BuildStatus | str]] = None,
+):
+    stmt = select(func.count()).select_from(JobRow)
+    if username:
+        stmt = stmt.where(JobRow.requested_by == username)
+    values = _status_values(statuses)
+    if values:
+        stmt = stmt.where(JobRow.status.in_(values))
+    return stmt
+
+
 def save_job_sync(job: BuildJob) -> None:
     factory = _sync_session()
     with factory() as session:
@@ -285,6 +329,16 @@ def list_jobs_sync(username: Optional[str] = None) -> list[BuildJob]:
         if username:
             stmt = stmt.where(JobRow.requested_by == username)
         return [_to_model(r) for r in session.scalars(stmt).all()]
+
+
+def count_jobs_sync(
+    username: Optional[str] = None,
+    statuses: Optional[Sequence[BuildStatus | str]] = None,
+) -> int:
+    factory = _sync_session()
+    with factory() as session:
+        n = session.scalar(_count_jobs_stmt(username=username, statuses=statuses))
+        return int(n or 0)
 
 
 def update_job_log_sync(job_id: str, log_tail: str) -> Optional[BuildJob]:
@@ -331,6 +385,33 @@ async def list_jobs(username: Optional[str] = None) -> list[BuildJob]:
             stmt = stmt.where(JobRow.requested_by == username)
         result = await session.execute(stmt)
         return [_to_model(r) for r in result.scalars().all()]
+
+
+async def count_jobs(
+    username: Optional[str] = None,
+    statuses: Optional[Sequence[BuildStatus | str]] = None,
+) -> int:
+    factory = _async_session()
+    async with factory() as session:
+        n = await session.scalar(_count_jobs_stmt(username=username, statuses=statuses))
+        return int(n or 0)
+
+
+async def active_job_counts() -> dict[str, int]:
+    """Queued/running totals for health and host-wide backpressure."""
+    values = tuple(s.value for s in ACTIVE_BUILD_STATUSES)
+    factory = _async_session()
+    async with factory() as session:
+        stmt = (
+            select(JobRow.status, func.count())
+            .where(JobRow.status.in_(values))
+            .group_by(JobRow.status)
+        )
+        result = await session.execute(stmt)
+        counts = {status: 0 for status in values}
+        for status, n in result.all():
+            counts[str(status)] = int(n)
+        return counts
 
 
 # ---------------------------------------------------------------------------

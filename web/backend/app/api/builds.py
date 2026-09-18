@@ -1,7 +1,7 @@
 """Build submission + status polling + cancel.
 
-vSphere passwords are accepted on submit and handed to the Celery worker.
-They are never persisted on the job row and never appear on API responses.
+vSphere passwords are accepted on submit and stored on the job row so the
+Celery worker can load them by ``job_id``. They never appear on API responses.
 """
 
 from __future__ import annotations
@@ -13,15 +13,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..auth import get_current_user, require_builder
 from ..config import get_settings
-from ..database import get_job, list_jobs, save_job
+from ..database import count_jobs, get_job, list_jobs, save_job
 from ..models import (
+    ACTIVE_BUILD_STATUSES,
     BuildJob,
     BuildJobPublic,
     BuildRequest,
     BuildStatus,
     Role,
     UserOut,
-    redact_build_request,
 )
 from ..tasks import celery_app, run_build
 
@@ -34,24 +34,31 @@ async def submit_build(
     user: UserOut = Depends(require_builder),
 ):
     settings = get_settings()
-    existing = await list_jobs(username=user.username)
-    queued = sum(1 for j in existing if j.status in (BuildStatus.queued, BuildStatus.running))
-    if queued >= settings.max_queued_per_user:
+    user_active = await count_jobs(username=user.username, statuses=ACTIVE_BUILD_STATUSES)
+    if user_active >= settings.max_queued_per_user:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            f"You already have {queued} active builds (cap {settings.max_queued_per_user})",
+            f"You already have {user_active} active builds (cap {settings.max_queued_per_user})",
+        )
+
+    global_active = await count_jobs(statuses=ACTIVE_BUILD_STATUSES)
+    host_cap = settings.max_concurrent_builds + settings.max_queue_depth
+    if global_active >= host_cap:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"Build queue is full ({global_active} active; cap {host_cap})",
         )
 
     job = BuildJob(
         id=str(uuid.uuid4()),
         status=BuildStatus.queued,
-        request=redact_build_request(req),
+        request=req,
         requested_by=user.username,
         created_at=datetime.now(timezone.utc),
     )
     await save_job(job)
-    # Password stays on the Celery payload only — never on the stored job.
-    task = run_build.delay(job.id, req.model_dump(), user.username)
+    # Worker loads the request (including credentials) from Postgres.
+    task = run_build.delay(job.id)
     job.celery_task_id = task.id
     await save_job(job)
     return BuildJobPublic.from_job(job)
