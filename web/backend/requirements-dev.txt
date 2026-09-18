@@ -1,0 +1,3 @@
+# Optional extras for a local web-backend pytest run.
+# CI installs pytest on top of requirements.txt (which already has aiosqlite).
+pytest>=8.0
