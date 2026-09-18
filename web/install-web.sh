@@ -34,6 +34,15 @@ if [[ -f "${ROOT}/web/backend/.env.example" && ! -f "${ROOT}/web/backend/.env" ]
   chmod 600 "${ROOT}/web/backend/.env"
 fi
 
+echo "==> applying database migrations (alembic upgrade head)"
+if ! (
+  cd "${ROOT}/web/backend"
+  "${VENV}/bin/alembic" upgrade head
+); then
+  echo "WARN: alembic upgrade failed. Start Postgres, set DATABASE_URL in ${ROOT}/web/backend/.env, then run:"
+  echo "  cd ${ROOT}/web/backend && ${VENV}/bin/alembic upgrade head"
+fi
+
 echo "==> building frontend"
 pushd "${ROOT}/web/frontend" >/dev/null
 if command -v npm >/dev/null 2>&1; then
@@ -58,9 +67,10 @@ cat <<EOF
 
 Web platform installed.
 
-  1. Edit ${ROOT}/web/backend/.env  (LDAP, SECRET_KEY, vSphere, Postgres)
-  2. systemctl start ovbuilder-web ovbuilder-worker
-  3. Point nginx at ${ROOT}/web/frontend/dist and proxy /api to 127.0.0.1:4567
+  1. Edit ${ROOT}/web/backend/.env  (LDAP, required SECRET_KEY, vSphere, DATABASE_URL)
+  2. cd ${ROOT}/web/backend && ${VENV}/bin/alembic upgrade head
+  3. systemctl start ovbuilder-web ovbuilder-worker
+  4. Point nginx at ${ROOT}/web/frontend/dist and proxy /api to 127.0.0.1:4567
 
 See docs/WEB.md.
 EOF

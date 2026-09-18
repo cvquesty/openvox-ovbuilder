@@ -7,6 +7,7 @@ can build at once without colliding on Terraform state or vCenter sessions.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -14,11 +15,18 @@ from typing import Any, Dict, Optional
 from celery import Celery
 
 from .config import get_settings
-from .database import get_job, save_job
+from .database import get_job_sync, save_job_sync, update_job_log_sync
 from .models import BuildStatus
 from .notify import notify_job
 
 settings = get_settings()
+
+# Names the CLI / Terraform already honor. Never put the password on argv.
+_VSPHERE_PASSWORD_ENV = (
+    "VSPHERE_PASSWORD",
+    "TF_VAR_vsphere_password",
+    "OVBUILDER_VSPHERE_PASSWORD",
+)
 
 celery_app = Celery(
     "ovbuilder_web",
@@ -76,8 +84,10 @@ def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
     env_vars["HOME"] = settings.ovbuilder_home
     env_vars["XDG_CONFIG_HOME"] = os.path.join(settings.ovbuilder_home, ".config")
     env_vars["XDG_DATA_HOME"] = os.path.join(settings.ovbuilder_home, ".local/share")
-    if req.get("vsphere_password"):
-        env_vars["OVBUILDER_VSPHERE_PASSWORD"] = req["vsphere_password"]
+    password = req.get("vsphere_password")
+    if password:
+        for key in _VSPHERE_PASSWORD_ENV:
+            env_vars[key] = password
 
     return cmd, env_vars
 
@@ -143,7 +153,9 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
             job.log_tail = "\n".join(log_lines)
             lines_since_persist += 1
             if lines_since_persist >= _LOG_PERSIST_INTERVAL:
-                save_job_sync(job)
+                # Log-only write: a full-row save would clobber cancel status
+                # set by the API in another process.
+                update_job_log_sync(job_id, job.log_tail)
                 lines_since_persist = 0
         rc = proc.wait()
     except FileNotFoundError:
@@ -180,30 +192,9 @@ def run_build(self, job_id: str, req: Dict[str, Any], requested_by: str) -> Dict
 
 
 def _extract_ip(lines: list[str]) -> Optional[str]:
-    import re
     ip_re = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
     for line in reversed(lines):
         m = ip_re.search(line)
         if m:
             return m.group(0)
     return None
-
-
-def get_job_sync(job_id: str):
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(get_job(job_id))
-
-
-def save_job_sync(job) -> None:
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    loop.run_until_complete(save_job(job))

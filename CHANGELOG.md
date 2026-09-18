@@ -5,7 +5,7 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.97-beta20] - 2026-09-17
+## [0.97-beta22] - 2026-09-17
 
 ### Added
 
@@ -15,14 +15,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `users.role_override` if set, else the LDAP group mapping refreshed at
   `ROLE_CACHE_TTL_SECONDS` (default 60). Admins set or clear overrides from
   Configuration → User roles or `PUT /api/auth/users/{username}`.
-- Alembic revision `0002_users_role_overrides` (table also created on API
-  startup via `create_all`).
+- Alembic revision `0002_users_role_overrides` (sqlite tests use
+  `create_all`; Postgres uses `alembic upgrade head`).
 
 ### Security
 
 - LDAP group revocation is visible within the role-cache TTL, not at access
   token expiry. A directory outage keeps the last stored LDAP role rather
-  than treating the user as gone. JWT `SECRET_KEY` handling is unchanged.
+  than treating the user as gone. JWT `SECRET_KEY` fail-fast and LDAP
+  STARTTLS from 0.97-beta20 are unchanged.
+
+## [0.97-beta21] - 2026-09-17
+
+### Fixed
+
+- **Web build jobs persist in Postgres** — the API and Celery workers now
+  share a SQLAlchemy `build_jobs` table instead of relying on per-process
+  memory or asyncio event-loop wrappers in the worker. Job list/detail/create,
+  status, and log updates survive process boundaries and restarts. RBAC
+  filtering is unchanged. Stored `request` JSON is redacted; the worker
+  receives the password only on the Celery payload.
+
+### Added
+
+- **Alembic is the schema path** — `alembic upgrade head` runs from
+  `install-web.sh` and on API startup. See `docs/WEB.md` for `DATABASE_URL`
+  (asyncpg for the API, psycopg for Celery/Alembic) and how to add revisions.
+
+## [0.97-beta20] - 2026-09-17
+
+### Security
+
+- **Web API never returns vSphere passwords** — `BuildRequestPublic` /
+  `BuildJobPublic` omit `vsphere_password` from the response schema.
+  The stored job row is redacted; only the Celery worker payload keeps
+  the secret for the running build.
+- **Worker does not put `--vsphere-password` on argv** (visible in `ps`).
+  Credentials go through `VSPHERE_PASSWORD` / `TF_VAR_vsphere_password` /
+  `OVBUILDER_VSPHERE_PASSWORD`. The CLI now reads those env keys and
+  `secrets.env` so `--vsphere-password` is optional.
+- **`SECRET_KEY` fails fast** unless `DEBUG=true`. Missing, empty, or
+  example values (`change-me-in-production`) refuse to boot outside
+  explicit debug. Debug mints an ephemeral key and warns.
+- **LDAP TLS** — verification stays on by default (`LDAP_SSL_VERIFY`).
+  `LDAP_USE_STARTTLS` now calls `start_tls()` before bind. Documented
+  `LDAP_CA_CERTS_FILE` PEM path for a private directory CA.
 
 ## [0.97-beta19] - 2026-09-15
 

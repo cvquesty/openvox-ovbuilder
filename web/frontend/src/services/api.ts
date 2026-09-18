@@ -129,6 +129,7 @@ export interface BuildRequest {
   location?: string;
   vsphere_server?: string;
   vsphere_user?: string;
+  /** Accepted on submit only; omitted from every job response. */
   vsphere_password?: string;
   skip_dnf_groups?: boolean;
 }

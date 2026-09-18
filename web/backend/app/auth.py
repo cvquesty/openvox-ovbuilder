@@ -15,12 +15,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl as ssl_mod
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import jwt
+import ldap3
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from ldap3 import SUBTREE, Connection, Server, Tls
 from passlib.context import CryptContext
 
 from .config import Settings, get_settings
@@ -39,44 +43,87 @@ ALGORITHM = "HS256"
 # LDAP
 # ---------------------------------------------------------------------------
 
-def _ldap_server(settings: Settings):
-    import ssl as ssl_mod
-    from ldap3 import Server, Tls
+def _ldap_uses_ssl(settings: Settings) -> bool:
+    return settings.ldap_use_ssl or settings.ldap_server_url.lower().startswith("ldaps://")
 
-    use_ssl = settings.ldap_use_ssl or settings.ldap_server_url.lower().startswith("ldaps://")
-    tls_kwargs: Dict[str, Any] = {}
-    if use_ssl or settings.ldap_use_starttls:
-        tls_kwargs["version"] = ssl_mod.PROTOCOL_TLSv1_2
-        tls_kwargs["ciphers"] = "ALL:!aNULL:!eNULL:!LOW:!EXP:!RC4:!MD5"
-        tls_kwargs["validate"] = (
-            ssl_mod.CERT_REQUIRED if settings.ldap_ssl_verify else ssl_mod.CERT_NONE
+
+def _ldap_tls(settings: Settings) -> Optional[Tls]:
+    """Build a Tls context when LDAPS or STARTTLS is configured."""
+    if not (_ldap_uses_ssl(settings) or settings.ldap_use_starttls):
+        return None
+    if not settings.ldap_ssl_verify:
+        logger.warning(
+            "LDAP TLS certificate verification is disabled "
+            "(LDAP_SSL_VERIFY=false). This is an insecure lab opt-in."
         )
-    tls = Tls(**tls_kwargs) if tls_kwargs else None
+    tls_kwargs: Dict[str, Any] = {
+        "version": ssl_mod.PROTOCOL_TLSv1_2,
+        "ciphers": "ALL:!aNULL:!eNULL:!LOW:!EXP:!RC4:!MD5",
+        "validate": (
+            ssl_mod.CERT_REQUIRED if settings.ldap_ssl_verify else ssl_mod.CERT_NONE
+        ),
+    }
+    if settings.ldap_ca_certs_file:
+        ca_path = Path(settings.ldap_ca_certs_file).expanduser()
+        if not ca_path.is_file():
+            logger.error("LDAP_CA_CERTS_FILE not found: %s", ca_path)
+            raise FileNotFoundError(f"LDAP_CA_CERTS_FILE not found: {ca_path}")
+        tls_kwargs["ca_certs_file"] = str(ca_path)
+    return Tls(**tls_kwargs)
+
+
+def _ldap_server(settings: Settings) -> Server:
     return Server(
         settings.ldap_server_url,
-        use_ssl=use_ssl,
-        tls=tls,
+        use_ssl=_ldap_uses_ssl(settings),
+        tls=_ldap_tls(settings),
         connect_timeout=settings.ldap_connection_timeout,
     )
 
 
+def _ldap_connection(
+    server: Server,
+    settings: Settings,
+    user: str,
+    password: str,
+) -> Optional[Connection]:
+    """Open, optionally STARTTLS, then bind. Never logs the password."""
+    conn = Connection(
+        server,
+        user=user,
+        password=password,
+        auto_bind=False,
+        raise_exceptions=False,
+        receive_timeout=settings.ldap_connection_timeout,
+    )
+    try:
+        conn.open()
+    except Exception:
+        logger.exception("LDAP TCP connect failed for %s", settings.ldap_server_url)
+        return None
+
+    # STARTTLS upgrades ldap://. Skip when the socket is already LDAPS.
+    if settings.ldap_use_starttls and not _ldap_uses_ssl(settings):
+        if not conn.start_tls():
+            logger.error("LDAP STARTTLS failed: %s", conn.result)
+            conn.unbind()
+            return None
+
+    if not conn.bind():
+        conn.unbind()
+        return None
+    return conn
+
+
 def ldap_authenticate(settings: Settings, username: str, password: str) -> Optional[Dict[str, Any]]:
     """Bind-search-bind. Returns user info dict or None."""
-    import ldap3
-    from ldap3 import SUBTREE
-
     server = _ldap_server(settings)
     try:
-        svc = ldap3.Connection(
-            server,
-            user=settings.ldap_bind_dn,
-            password=settings.ldap_bind_password,
-            auto_bind=True,
-            raise_exceptions=False,
-            receive_timeout=settings.ldap_connection_timeout,
+        svc = _ldap_connection(
+            server, settings, settings.ldap_bind_dn, settings.ldap_bind_password
         )
-        if not svc.bound:
-            logger.error("LDAP service bind failed: %s", svc.result)
+        if svc is None:
+            logger.error("LDAP service account bind failed for %s", settings.ldap_bind_dn)
             return None
 
         filt = settings.ldap_user_search_filter.replace(
@@ -99,15 +146,8 @@ def ldap_authenticate(settings: Settings, username: str, password: str) -> Optio
         entry = svc.entries[0]
         user_dn = str(entry.entry_dn)
 
-        user_conn = ldap3.Connection(
-            server,
-            user=user_dn,
-            password=password,
-            auto_bind=True,
-            raise_exceptions=False,
-            receive_timeout=settings.ldap_connection_timeout,
-        )
-        if not user_conn.bound:
+        user_conn = _ldap_connection(server, settings, user_dn, password)
+        if user_conn is None:
             svc.unbind()
             return None
 
@@ -129,9 +169,6 @@ def ldap_authenticate(settings: Settings, username: str, password: str) -> Optio
 
 
 def _groups_for(conn, settings: Settings, user_dn: str, username: str) -> List[str]:
-    import ldap3
-    from ldap3 import SUBTREE
-
     if not settings.ldap_group_base_dn:
         return []
     member_attr = settings.ldap_group_member_attr or "member"
@@ -181,22 +218,14 @@ def ldap_lookup_user(settings: Settings, username: str) -> Optional[Dict[str, An
     Raises :class:`LdapUnavailable` on bind/connect/search failures so we do
     not treat an outage as "user vanished".
     """
-    import ldap3
-    from ldap3 import SUBTREE
-
     server = _ldap_server(settings)
     svc = None
     try:
-        svc = ldap3.Connection(
-            server,
-            user=settings.ldap_bind_dn,
-            password=settings.ldap_bind_password,
-            auto_bind=True,
-            raise_exceptions=False,
-            receive_timeout=settings.ldap_connection_timeout,
+        svc = _ldap_connection(
+            server, settings, settings.ldap_bind_dn, settings.ldap_bind_password
         )
-        if not svc.bound:
-            logger.error("LDAP service bind failed during role refresh: %s", svc.result)
+        if svc is None:
+            logger.error("LDAP service bind failed during role refresh")
             raise LdapUnavailable("LDAP service bind failed")
 
         filt = settings.ldap_user_search_filter.replace(
