@@ -1,12 +1,19 @@
 """LDAP authentication (bind-search-bind) + JWT sessions.
 
 Reuses the same pattern as openvox-gui's auth_ldap.py, but simplified for the
-builder's three roles: admin, builder, viewer. Group membership decides the
-role on first login; admins can override locally later.
+builder's three roles: admin, builder, viewer.
+
+Effective role on each request
+------------------------------
+``local override`` (Postgres) beats the last LDAP group mapping. The JWT
+``role`` claim is a hint used only when we have no row yet and LDAP is
+unreachable. Directory changes are picked up on the next request after
+``ROLE_CACHE_TTL_SECONDS`` (default 60s), not when the access token expires.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import ssl as ssl_mod
 from datetime import datetime, timedelta, timezone
@@ -21,7 +28,8 @@ from ldap3 import SUBTREE, Connection, Server, Tls
 from passlib.context import CryptContext
 
 from .config import Settings, get_settings
-from .models import Role, UserOut
+from .database import get_user, upsert_user
+from .models import Role, UserAdminOut, UserOut, coerce_role, effective_role
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +204,139 @@ def role_from_groups(settings: Settings, groups: List[str]) -> Role:
         return Role.builder
     if settings.ldap_viewer_group.lower() in lower:
         return Role.viewer
-    return Role(settings.ldap_default_role)
+    return coerce_role(settings.ldap_default_role)
+
+
+class LdapUnavailable(Exception):
+    """Directory could not be reached; callers should keep the cached role."""
+
+
+def ldap_lookup_user(settings: Settings, username: str) -> Optional[Dict[str, Any]]:
+    """Service-bind lookup (no user password).
+
+    Returns a user-info dict when the entry exists, ``None`` when it does not.
+    Raises :class:`LdapUnavailable` on bind/connect/search failures so we do
+    not treat an outage as "user vanished".
+    """
+    server = _ldap_server(settings)
+    svc = None
+    try:
+        svc = _ldap_connection(
+            server, settings, settings.ldap_bind_dn, settings.ldap_bind_password
+        )
+        if svc is None:
+            logger.error("LDAP service bind failed during role refresh")
+            raise LdapUnavailable("LDAP service bind failed")
+
+        filt = settings.ldap_user_search_filter.replace(
+            "{username}", ldap3.utils.conv.escape_filter_chars(username)
+        )
+        svc.search(
+            settings.ldap_user_base_dn,
+            filt,
+            search_scope=SUBTREE,
+            attributes=[
+                settings.ldap_user_attr_username,
+                settings.ldap_user_attr_email or "mail",
+                settings.ldap_user_attr_display_name or "cn",
+            ],
+        )
+        if not svc.entries:
+            return None
+
+        entry = svc.entries[0]
+        user_dn = str(entry.entry_dn)
+        return {
+            "dn": user_dn,
+            "username": username,
+            "email": str(getattr(entry, settings.ldap_user_attr_email or "mail", "")) or None,
+            "display_name": str(
+                getattr(entry, settings.ldap_user_attr_display_name or "cn", username)
+            ),
+            "groups": _groups_for(svc, settings, user_dn, username),
+        }
+    except LdapUnavailable:
+        raise
+    except Exception as exc:
+        logger.exception("LDAP role lookup failed for %s", username)
+        raise LdapUnavailable(str(exc)) from exc
+    finally:
+        if svc is not None:
+            try:
+                svc.unbind()
+            except Exception:
+                pass
+
+
+def _cache_is_fresh(record: UserAdminOut, settings: Settings, now: datetime) -> bool:
+    ttl = max(0, int(settings.role_cache_ttl_seconds))
+    if record.ldap_checked_at is None:
+        return False
+    checked = record.ldap_checked_at
+    if checked.tzinfo is None:
+        checked = checked.replace(tzinfo=timezone.utc)
+    return (now - checked) < timedelta(seconds=ttl)
+
+
+async def resolve_user_role(
+    username: str,
+    settings: Settings,
+    *,
+    token_role: Optional[Role] = None,
+    force_refresh: bool = False,
+) -> UserAdminOut:
+    """Load the user row and refresh LDAP mapping when the cache is stale.
+
+    Override, when set, is always the effective role. A confirmed empty /
+    missing LDAP entry (not an outage) stores the configured default role.
+    """
+    now = datetime.now(timezone.utc)
+    record = await get_user(username)
+    should_refresh = force_refresh or record is None or not _cache_is_fresh(record, settings, now)
+
+    if should_refresh:
+        info: Optional[Dict[str, Any]]
+        lookup_failed = False
+        try:
+            info = await asyncio.to_thread(ldap_lookup_user, settings, username)
+        except LdapUnavailable:
+            info = None
+            lookup_failed = True
+
+        if info is not None:
+            record = await upsert_user(
+                username=username,
+                email=info.get("email"),
+                display_name=info.get("display_name"),
+                ldap_role=role_from_groups(settings, info.get("groups") or []),
+                ldap_checked_at=now,
+            )
+        elif not lookup_failed:
+            # User is gone or has no directory entry — drop to default unless
+            # an override is already stored (upsert keeps it).
+            record = await upsert_user(
+                username=username,
+                ldap_role=coerce_role(settings.ldap_default_role),
+                ldap_checked_at=now,
+            )
+        elif record is None and token_role is not None:
+            # First request, directory down: persist the JWT hint so RBAC
+            # still works, but leave ldap_checked_at empty so we retry.
+            record = await upsert_user(
+                username=username,
+                ldap_role=token_role,
+                ldap_checked_at=None,
+            )
+
+    if record is None:
+        fallback = token_role or coerce_role(settings.ldap_default_role)
+        return UserAdminOut(
+            username=username,
+            ldap_role=fallback,
+            role_override=None,
+            role=fallback,
+        )
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +370,19 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserOut:
     payload = decode_token(token, settings)
     if not payload or "sub" not in payload:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
-    return UserOut(username=payload["sub"], role=Role(payload.get("role", "viewer")))
+    username = str(payload["sub"])
+    token_role = coerce_role(payload.get("role"), Role.viewer)
+    try:
+        record = await resolve_user_role(username, settings, token_role=token_role)
+    except Exception:
+        logger.exception("role resolve failed for %s; using token role (degraded)", username)
+        return UserOut(username=username, role=token_role)
+    return UserOut(
+        username=record.username,
+        role=effective_role(record.ldap_role, record.role_override),
+        display_name=record.display_name,
+        email=record.email,
+    )
 
 
 def require_role(*roles: Role):

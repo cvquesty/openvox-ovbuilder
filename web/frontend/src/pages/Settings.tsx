@@ -18,6 +18,7 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconAlertCircle, IconCheck, IconSettings } from '@tabler/icons-react';
 import { settings, type RuntimeSettingsUpdate } from '../services/api';
+import { UserRolesCard } from './UserRoles';
 
 type FormValues = {
   vsphere_server: string;
@@ -134,7 +135,7 @@ export function SettingsPage() {
           <Title order={2}>Configuration</Title>
         </Group>
         <Text c="dimmed" size="sm">
-          Admin-only settings for vSphere connectivity and package registries. Passwords are stored on the server and never returned to the browser.
+          Admin-only settings for vSphere, package registries, and local role overrides. Passwords are stored on the server and never returned to the browser.
         </Text>
       </div>
 
@@ -218,6 +219,8 @@ export function SettingsPage() {
           </Group>
         </Stack>
       </form>
+
+      <UserRolesCard />
     </Stack>
   );
 }

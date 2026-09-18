@@ -38,6 +38,25 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export type AppRole = 'admin' | 'builder' | 'viewer';
+
+export interface AuthUser {
+  username: string;
+  role: AppRole;
+  display_name?: string;
+  email?: string;
+}
+
+export interface AuthUserAdmin {
+  username: string;
+  email?: string | null;
+  display_name?: string | null;
+  ldap_role: AppRole;
+  role_override: AppRole | null;
+  role: AppRole;
+  ldap_checked_at?: string | null;
+}
+
 export const auth = {
   login: (username: string, password: string) => {
     const body = new URLSearchParams();
@@ -52,11 +71,17 @@ export const auth = {
       return data;
     });
   },
-  me: () => request<{ username: string; role: string; display_name?: string; email?: string }>('/auth/me'),
+  me: () => request<AuthUser>('/auth/me'),
   logout: () => {
     localStorage.removeItem('ovbuilder_token');
     return Promise.resolve();
   },
+  users: () => request<AuthUserAdmin[]>('/auth/users'),
+  setRoleOverride: (username: string, role_override: AppRole | null) =>
+    request<AuthUserAdmin>(`/auth/users/${encodeURIComponent(username)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role_override }),
+    }),
 };
 
 export const builds = {

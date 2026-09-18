@@ -5,6 +5,29 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta23] - 2026-09-18
+
+### Added
+
+- **Web auth: server-side role freshness and local overrides.** JWT still
+  identifies the user (and carries a role hint) but `get_current_user` no
+  longer trusts the token role for the full 8h lifetime. Effective role is
+  `users.role_override` if set, else the LDAP group mapping refreshed at
+  `ROLE_CACHE_TTL_SECONDS` (default 60). Admins set or clear overrides from
+  Configuration → User roles or `PUT /api/auth/users/{username}`.
+- Alembic revision `0002_users_role_overrides` (sqlite tests use
+  `create_all`; Postgres uses `alembic upgrade head`).
+- Smoke tests from #29 kept: OAuth2 login and viewer/builder/admin JWT
+  gates. `auth_client` uses the sqlite store; LDAP lookups are stubbed
+  unavailable by default so `/me` does not wait on a live directory.
+
+### Security
+
+- LDAP group revocation is visible within the role-cache TTL, not at access
+  token expiry. A directory outage keeps the last stored LDAP role rather
+  than treating the user as gone. JWT `SECRET_KEY` fail-fast and LDAP
+  STARTTLS from 0.97-beta20 are unchanged.
+
 ## [0.97-beta22] - 2026-09-17
 
 ### Added

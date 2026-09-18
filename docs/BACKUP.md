@@ -1,6 +1,7 @@
 # Postgres backup for OV Builder web
 
-Job state lives in the local Postgres database (`ovbuilder`).
+Job state and web-auth user rows (LDAP role cache + local overrides) live in
+the local Postgres database (`ovbuilder`).
 
 ## Nightly dump
 
