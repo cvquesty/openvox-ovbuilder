@@ -18,12 +18,12 @@ def _ldap_ok(username: str, groups: list[str]):
     return _auth
 
 
-async def test_login_success_form_urlencoded(auth_client, monkeypatch):
+def test_login_success_form_urlencoded(auth_client, monkeypatch):
     monkeypatch.setattr(
         "app.api.auth.ldap_authenticate",
         _ldap_ok("alice", ["ovbuilder-builders"]),
     )
-    res = await auth_client.post(
+    res = auth_client.post(
         "/api/auth/login",
         data={"username": "alice", "password": "correct-horse"},
         headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -40,12 +40,12 @@ async def test_login_success_form_urlencoded(auth_client, monkeypatch):
     assert payload["role"] == "builder"
 
 
-async def test_login_rejects_bad_credentials(auth_client, monkeypatch):
+def test_login_rejects_bad_credentials(auth_client, monkeypatch):
     monkeypatch.setattr(
         "app.api.auth.ldap_authenticate",
         _ldap_ok("alice", ["ovbuilder-builders"]),
     )
-    res = await auth_client.post(
+    res = auth_client.post(
         "/api/auth/login",
         data={"username": "alice", "password": "wrong"},
     )
@@ -53,22 +53,22 @@ async def test_login_rejects_bad_credentials(auth_client, monkeypatch):
     assert res.json()["detail"] == "Bad credentials"
 
 
-async def test_login_rejects_json_body(auth_client, monkeypatch):
+def test_login_rejects_json_body(auth_client, monkeypatch):
     monkeypatch.setattr(
         "app.api.auth.ldap_authenticate",
         _ldap_ok("alice", ["ovbuilder-builders"]),
     )
-    res = await auth_client.post(
+    res = auth_client.post(
         "/api/auth/login",
         json={"username": "alice", "password": "correct-horse"},
     )
     assert res.status_code == 422
 
 
-async def test_login_ldap_disabled_is_unavailable(auth_client, monkeypatch):
+def test_login_ldap_disabled_is_unavailable(auth_client, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "ldap_enabled", False)
-    res = await auth_client.post(
+    res = auth_client.post(
         "/api/auth/login",
         data={"username": "alice", "password": "correct-horse"},
     )
@@ -76,45 +76,50 @@ async def test_login_ldap_disabled_is_unavailable(auth_client, monkeypatch):
     assert res.json()["detail"] == "LDAP disabled"
 
 
-async def test_me_with_valid_token(auth_client):
-    res = await auth_client.get("/api/auth/me", headers=auth_header("alice", Role.builder))
+def test_me_with_valid_token(auth_client):
+    res = auth_client.get("/api/auth/me", headers=auth_header("alice", Role.builder))
     assert res.status_code == 200
     body = res.json()
     assert body["username"] == "alice"
     assert body["role"] == "builder"
 
 
-async def test_me_without_token_is_unauthorized(auth_client):
-    res = await auth_client.get("/api/auth/me")
+def test_me_without_token_is_unauthorized(auth_client):
+    res = auth_client.get("/api/auth/me")
     assert res.status_code == 401
 
 
-async def test_login_then_me_roundtrip(auth_client, monkeypatch):
+def test_login_then_me_roundtrip(auth_client, monkeypatch):
     monkeypatch.setattr(
         "app.api.auth.ldap_authenticate",
         _ldap_ok("root", ["ovbuilder-admins"]),
     )
-    login = await auth_client.post(
+    login = auth_client.post(
         "/api/auth/login",
         data={"username": "root", "password": "correct-horse"},
     )
     token = login.json()["access_token"]
-    me = await auth_client.get(
+    me = auth_client.get(
         "/api/auth/me",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert me.status_code == 200
-    assert me.json() == {"username": "root", "role": "admin", "display_name": None, "email": None}
+    assert me.json() == {
+        "username": "root",
+        "role": "admin",
+        "display_name": None,
+        "email": None,
+    }
 
 
-async def test_roles_is_public(auth_client):
-    res = await auth_client.get("/api/auth/roles")
+def test_roles_is_public(auth_client):
+    res = auth_client.get("/api/auth/roles")
     assert res.status_code == 200
     assert res.json() == ["admin", "builder", "viewer"]
 
 
-async def test_health(auth_client):
-    res = await auth_client.get("/api/health")
+def test_health(auth_client):
+    res = auth_client.get("/api/health")
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
 

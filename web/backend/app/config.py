@@ -9,12 +9,24 @@ containers. Override via .env if you ever containerize.
 
 from __future__ import annotations
 
+import logging
 import secrets
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# Historic example values that must never be accepted as a real JWT secret.
+_INSECURE_SECRET_KEYS = frozenset(
+    {
+        "",
+        "change-me-in-production",
+        "change-me-to-a-long-random-string",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -27,24 +39,10 @@ class Settings(BaseSettings):
     # --- App ----------------------------------------------------------------
     app_name: str = "OpenVox OV Builder"
     debug: bool = False
-    # No insecure default. If SECRET_KEY is unset we generate an ephemeral one
-    # (fine for dev, but tokens won't survive restarts) and log a loud warning.
+    # No insecure default. Missing/example keys fail fast unless DEBUG=true,
+    # which is an explicit opt-in to an ephemeral (non-persistent) key.
     secret_key: str = Field(default="")
     access_token_expire_minutes: int = 60 * 8
-
-    @field_validator("secret_key")
-    @classmethod
-    def _require_secret(cls, v: str) -> str:
-        if not v or v in ("change-me-in-production", "change-me-to-a-long-random-string"):
-            import logging
-            logging.getLogger(__name__).warning(
-                "SECRET_KEY is unset or using the example value; "
-                "generating an ephemeral key. Set SECRET_KEY in .env for production."
-            )
-            return secrets.token_urlsafe(48)
-        if len(v) < 32:
-            raise ValueError("SECRET_KEY must be at least 32 characters")
-        return v
 
     # --- CORS (React dev server + production origin) ------------------------
     cors_origins: list[str] = Field(
@@ -72,9 +70,35 @@ class Settings(BaseSettings):
     ldap_default_role: str = "viewer"
     ldap_use_ssl: bool = False
     ldap_use_starttls: bool = False
-    # Default to verifying certs; override to false only for lab/dev.
+    # Default to verifying certs; set false only as an explicit lab opt-in.
     ldap_ssl_verify: bool = True
+    # PEM bundle for a private LDAP CA. Used when ldap_ssl_verify is true.
+    ldap_ca_certs_file: Optional[str] = None
     ldap_connection_timeout: int = 10
+
+    @model_validator(mode="after")
+    def _validate_secret_key(self) -> "Settings":
+        key = (self.secret_key or "").strip()
+        if key in _INSECURE_SECRET_KEYS:
+            if self.debug:
+                logger.warning(
+                    "SECRET_KEY is unset or using the example value; "
+                    "generating an ephemeral key because DEBUG=true. "
+                    "Tokens will not survive process restart. "
+                    "Set SECRET_KEY in .env for any shared or persistent deploy."
+                )
+                self.secret_key = secrets.token_urlsafe(48)
+                return self
+            raise ValueError(
+                "SECRET_KEY is unset or using an insecure default. "
+                "Set SECRET_KEY to at least 32 random characters "
+                '(python -c "import secrets; print(secrets.token_urlsafe(48))"). '
+                "For local development only, set DEBUG=true to allow an "
+                "ephemeral key."
+            )
+        if len(key) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters")
+        return self
 
     # --- Celery / Redis (local system services, not containers) ------------
     redis_url: str = "redis://127.0.0.1:6379/0"
