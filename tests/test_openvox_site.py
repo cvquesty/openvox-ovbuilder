@@ -9,7 +9,7 @@ from ovbuilder.openvox_site import (
     site_for,
 )
 
-from tests.placeholders import test_placeholder
+from tests.placeholders import placeholder_value
 
 
 def test_infer_location_from_domain():
@@ -49,7 +49,7 @@ def test_no_proxy_includes_clone_identity():
 
 
 def test_parse_proxy_url_splits_auth():
-    role = test_placeholder()
+    role = placeholder_value()
     raw = "http://{0}:{1}@proxy.example.com:3128".format("labuser", role)
     p = parse_proxy_url(raw)
     assert p["host"] == "proxy.example.com"

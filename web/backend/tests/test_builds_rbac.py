@@ -13,7 +13,7 @@ from app.database import save_job_sync
 from app.models import BuildJob, BuildRequest, BuildStatus, Role
 
 from tests.conftest import auth_header
-from tests.placeholders import test_placeholder
+from tests.placeholders import placeholder_value
 
 
 def _build_payload() -> dict:
@@ -22,7 +22,7 @@ def _build_payload() -> dict:
         "ip": "10.0.0.8",
         "os_image": "ubuntu-24.04",
     }
-    payload["vsphere_password"] = test_placeholder()
+    payload["vsphere_password"] = placeholder_value()
     return payload
 
 
@@ -38,7 +38,7 @@ def _seed_job(*, owner: str, hostname: str = "other") -> BuildJob:
             hostname=hostname,
             ip="10.0.0.9",
             os_image="ubuntu-24.04",
-            vsphere_password=test_placeholder(),
+            vsphere_password=placeholder_value(),
         ),
         requested_by=owner,
         created_at=datetime.now(timezone.utc),

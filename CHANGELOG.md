@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   #27/#28/#29 tests used dummy `password=` / `username`+`password` /
   `VSPHERE_PASSWORD=` literals that Generic Password and Username Password
   detectors still flagged. Tests now inject `PLACEHOLDER_NOT_A_SECRET`
-  via `test_placeholder()` / monkeypatch so sources do not embed
+  via `placeholder_value()` / monkeypatch so sources do not embed
   detector-triggering assignments. Docs, `.env.example`, Packer example
   vars, and the committed Postgres default URL no longer include
   password-like values. All findings were test/docs dummies, not live

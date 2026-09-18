@@ -7,11 +7,11 @@ from app.config import Settings, get_settings
 from app.models import Role
 
 from tests.conftest import auth_header
-from tests.placeholders import login_form, test_placeholder
+from tests.placeholders import login_form, placeholder_value
 
 
 def _ldap_ok(username: str, groups: list[str]):
-    expected = test_placeholder()
+    expected = placeholder_value()
 
     def _auth(_settings, user: str, supplied: str):
         if user == username and supplied == expected:

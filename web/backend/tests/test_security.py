@@ -19,7 +19,7 @@ from app.models import (
     redact_build_request,
 )
 from app.tasks import _build_command
-from tests.placeholders import test_placeholder
+from tests.placeholders import placeholder_value
 
 
 def _settings(**kwargs) -> Settings:
@@ -72,7 +72,7 @@ def test_public_job_omits_vsphere_password():
         hostname="web01",
         ip="10.0.0.10",
         os_image="ubuntu-24.04",
-        vsphere_password=test_placeholder(),
+        vsphere_password=placeholder_value(),
         vsphere_user="svc@example.com",
     )
     job = BuildJob(
@@ -92,7 +92,7 @@ def test_public_job_omits_vsphere_password():
 
 
 def test_redact_build_request_clears_password():
-    guest = test_placeholder()
+    guest = placeholder_value()
     req = BuildRequest(
         hostname="web01",
         ip="10.0.0.10",
@@ -106,7 +106,7 @@ def test_redact_build_request_clears_password():
 
 def test_build_command_uses_env_not_argv():
     get_settings.cache_clear()
-    guest = test_placeholder()
+    guest = placeholder_value()
     payload = {
         "hostname": "web01",
         "ip": "10.0.0.10",
@@ -175,7 +175,7 @@ def test_start_tls_called_for_ldap_starttls():
     conn.bind.return_value = True
 
     with patch("app.auth.Connection", return_value=conn) as ctor:
-        opened = _ldap_connection(server, settings, "cn=svc", test_placeholder())
+        opened = _ldap_connection(server, settings, "cn=svc", placeholder_value())
 
     ctor.assert_called_once()
     assert ctor.call_args.kwargs["auto_bind"] is False
@@ -197,7 +197,7 @@ def test_start_tls_skipped_on_ldaps():
     conn.bind.return_value = True
 
     with patch("app.auth.Connection", return_value=conn):
-        _ldap_connection(server, settings, "cn=svc", test_placeholder())
+        _ldap_connection(server, settings, "cn=svc", placeholder_value())
 
     conn.start_tls.assert_not_called()
     conn.bind.assert_called_once()

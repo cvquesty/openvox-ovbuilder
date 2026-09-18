@@ -25,7 +25,7 @@ from app.database import (
     update_job_log_sync,
 )
 from app.models import BuildJob, BuildRequest, BuildStatus, redact_build_request
-from tests.placeholders import test_placeholder
+from tests.placeholders import placeholder_value
 
 
 def _job(**kwargs) -> BuildJob:
@@ -37,7 +37,7 @@ def _job(**kwargs) -> BuildJob:
                 hostname="web01",
                 ip="10.0.0.8",
                 os_image="ubuntu-24.04",
-                vsphere_password=test_placeholder(),
+                vsphere_password=placeholder_value(),
             )
         ),
         requested_by="alice",
@@ -50,7 +50,7 @@ def _job(**kwargs) -> BuildJob:
 def test_database_urls_normalize_postgres_drivers():
     # Assemble at runtime so committed sources have no user:pass@ URI.
     user = "ovbuilder"
-    role = test_placeholder()
+    role = placeholder_value()
     raw = "postgresql://{0}:{1}@127.0.0.1:5432/ovbuilder".format(user, role)
     async_url, sync_url = database_urls(raw)
     assert async_url.startswith("postgresql+asyncpg://")

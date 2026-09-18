@@ -1,7 +1,7 @@
 """GG-safe sentinels for CLI tests.
 
 Never assign a string literal to a password-like key in test sources.
-Call ``test_placeholder()`` (or read ``OVBUILDER_TEST_PLACEHOLDER``) instead.
+Call ``placeholder_value()`` (or read ``OVBUILDER_TEST_PLACEHOLDER``) instead.
 """
 
 from __future__ import annotations
@@ -12,5 +12,5 @@ import os
 PLACEHOLDER_NOT_A_SECRET = "PLACEHOLDER_NOT_A_SECRET"
 
 
-def test_placeholder() -> str:
+def placeholder_value() -> str:
     return os.environ.get("OVBUILDER_TEST_PLACEHOLDER", PLACEHOLDER_NOT_A_SECRET)

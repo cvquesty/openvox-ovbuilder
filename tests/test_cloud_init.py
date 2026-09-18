@@ -13,7 +13,7 @@ from ovbuilder.cloud_init import (
 )
 from ovbuilder.openvox_site import DEFAULT_SITES
 
-from tests.placeholders import test_placeholder
+from tests.placeholders import placeholder_value
 
 
 def test_metadata_is_identity_only():
@@ -98,7 +98,7 @@ def test_userdata_embeds_proxy_and_agent_after_network():
 
 
 def test_userdata_with_password_includes_chpasswd():
-    guest = test_placeholder()
+    guest = placeholder_value()
     u = build_userdata(
         "web1",
         "10.0.1.5",
@@ -114,7 +114,7 @@ def test_guestinfo_uses_env_password(monkeypatch=None):
     # stdlib-friendly: set env without pytest monkeypatch
     key = "OVBUILDER_GOLDEN_PASSWORD"
     old = os.environ.get(key)
-    guest = test_placeholder()
+    guest = placeholder_value()
     os.environ[key] = guest
     try:
         g = guestinfo_extra_config(

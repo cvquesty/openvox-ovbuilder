@@ -12,7 +12,7 @@ from app.auth import get_current_user, require_builder
 from app.database import get_job_sync, save_job_sync
 from app.main import app
 from app.models import BuildJob, BuildRequest, BuildStatus, Role, UserOut
-from tests.placeholders import test_placeholder
+from tests.placeholders import placeholder_value
 
 
 class _FakeTask:
@@ -42,7 +42,7 @@ def test_create_list_detail_redact_password(api):
         "ip": "10.0.0.8",
         "os_image": "ubuntu-24.04",
     }
-    payload["vsphere_password"] = test_placeholder()
+    payload["vsphere_password"] = placeholder_value()
     created = api.post("/api/builds", json=payload)
     assert created.status_code == 202, created.text
     body = created.json()
