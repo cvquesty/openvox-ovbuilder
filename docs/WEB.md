@@ -7,6 +7,11 @@ in parallel via Celery.
 The CLI installer (`./install.sh`) does **not** install this stack. Laptop and
 workstation users who only want `ovbuilder` can ignore this document.
 
+The Build form OS picker lists live `ovbuilder-*` templates from every
+datacenter (name + short label only). The backend resolves the template's
+source datacenter silently so SEA3 can clone goldens that live in PDXC.
+Compute pickers include standalone ESXi hosts as well as DRS clusters.
+
 ## Roles
 
 | Role | LDAP group (default) | Can |
@@ -44,10 +49,11 @@ Resolve credentials in this order (`web/backend/app/vsphere_client.py`):
    - `VSPHERE_IGNORE_SSL` (lab default `true`)
 3. CLI `config.yaml` for server / datacenter / SSL when a web field is empty
 
-If credentials are missing or vCenter is unreachable, live inventory endpoints
-return **HTTP 502** with a clear error. The Build form shows a warning and
-still allows submit using config defaults. It never silently invents cluster
-or network names.
+OS images come from live vCenter (`ovbuilder-*` templates across all
+datacenters). If credentials are missing or vCenter is unreachable, the
+OS picker falls back to configured `ovbuilder-*` goldens so the form still
+renders. Cluster, network, datacenter, and datastore-cluster lists still
+return **HTTP 502** when vCenter is down.
 
 CI mocks the vSphere session. No live vCenter is required for tests.
 
@@ -318,7 +324,7 @@ workers do not share a state file. Do not run bare `terraform apply` inside
 - `PUT /api/auth/users/{username}` — admin: set or clear `role_override`
 - `POST /api/builds` — queue a build
 - `POST /api/builds/{id}/cancel` — stop a queued/running job
-- `GET /api/inventory/os-images` — Packer goldens from config
+- `GET /api/inventory/os-images` — live `ovbuilder-*` templates (name + label; source DC is not returned). Config goldens if vCenter is down.
 - `GET /api/inventory/environments` — env → datastore-cluster mapping
 - `GET /api/inventory/clusters` — live compute clusters (502 if vSphere down)
 - `GET /api/inventory/networks` — live port groups (502 if vSphere down)

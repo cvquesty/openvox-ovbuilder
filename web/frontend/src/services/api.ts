@@ -158,6 +158,8 @@ export interface OsImage {
   key: string;
   label: string;
   default_user: string;
+  /** Inventory name (ovbuilder-*); never includes datacenter. */
+  name?: string;
 }
 
 export interface Environment {

@@ -245,7 +245,7 @@ export function BuildFormPage() {
       <div>
         <Title order={2} style={{ letterSpacing: '-0.02em' }}>Build a VM</Title>
         <Text size="sm" c="dimmed" mt={4}>
-          Pick OS, environment, compute cluster, and network from live vCenter. Storage DRS is chosen from the environment.
+          Pick an ovbuilder-* OS template, environment, compute cluster or host, and network from live vCenter. Storage DRS is chosen from the environment.
         </Text>
       </div>
 
@@ -270,7 +270,13 @@ export function BuildFormPage() {
             <Group grow>
               <Select
                 label="Operating System"
-                data={osImages.map((o) => ({ value: o.key, label: o.label }))}
+                data={osImages.map((o) => ({
+                  value: o.key,
+                  label:
+                    o.name && o.name !== o.label
+                      ? `${o.name} — ${o.label}`
+                      : o.label,
+                }))}
                 required
                 {...form.getInputProps('os_image')}
               />
@@ -289,8 +295,8 @@ export function BuildFormPage() {
 
             <Group grow>
               <Select
-                label="Compute cluster"
-                placeholder={clusters.length ? 'Select cluster' : 'Unavailable (vSphere unreachable)'}
+                label="Compute cluster or host"
+                placeholder={clusters.length ? 'Select cluster or host' : 'Unavailable (vSphere unreachable)'}
                 data={clusters.map((name) => ({ value: name, label: name }))}
                 searchable
                 required={clusters.length > 0}

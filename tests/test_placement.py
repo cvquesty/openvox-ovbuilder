@@ -59,6 +59,9 @@ def test_os_images_from_config_defaults():
     keys = {r["key"] for r in rows}
     assert "ubuntu-24.04" in keys
     assert "almalinux-10" in keys
+    for row in rows:
+        assert row["name"].startswith("ovbuilder-")
+        assert "datacenter" not in row
 
 
 def test_shorthand_yaml_string_is_datastore_cluster(tmp_path: Path):

@@ -284,6 +284,8 @@ def run_terraform_apply(
         "iso_path": vars.get("iso_path") or "",
         "provision_mode": provision_mode,
         "template_name": vars.get("template_name") or "",
+        "template_datacenter": vars.get("template_datacenter") or "",
+        "compute_type": vars.get("compute_type") or "cluster",
         "guest_id": vars.get("guest_id") or "",
         "guestinfo_extra_config": vars.get("guestinfo_extra_config") or {},
         "num_cpus": int(vars.get("num_cpus", config.default_cpus)),

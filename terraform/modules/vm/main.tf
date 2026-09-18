@@ -6,6 +6,9 @@
 #   Clone a Packer golden template. Identity (hostname/IP) is injected via
 #   guestinfo_* extra_config (cloud-init). No install ISO is attached.
 #   Disk size is max(requested, template disk) so clones never shrink.
+#   The golden may live in a different datacenter of the same vCenter
+#   (template_datacenter); destination cluster/host, datastore, and
+#   networks stay on var.datacenter.
 #
 # provision_mode = "iso"
 #   Create empty thin disk + attach datastore ISO for interactive/kickstart
@@ -13,7 +16,12 @@
 #   guest can boot the media. ovbuilder disconnects the ISO via pyVmomi after
 #   OS install; lifecycle.ignore_changes on cdrom prevents re-attach on apply.
 #
-# Both resources use count so only one exists in state. Per-VM state files
+# compute_type = "cluster" (default)
+#   Place via data.vsphere_compute_cluster (ATLC / PDXC DRS clusters).
+# compute_type = "host"
+#   Place via data.vsphere_host resource pool (standalone ESXi, e.g. SEA3).
+#
+# Both VM resources use count so only one exists in state. Per-VM state files
 # (outside this module) ensure ovca3 create does not rename ovca2.
 # =============================================================================
 
@@ -23,6 +31,10 @@ locals {
   is_clone = var.provision_mode == "clone"
   is_iso   = var.provision_mode == "iso"
   use_dsc  = var.vm_datastore_cluster != null && var.vm_datastore_cluster != ""
+  is_host  = var.compute_type == "host"
+  # Golden may live in another DC of the same vCenter (SEA3 clones PDXC goldens).
+  template_dc_name = var.template_datacenter != "" ? var.template_datacenter : var.datacenter
+  template_dc_is_remote = local.is_clone && local.template_dc_name != var.datacenter
   # Map of guestinfo.* keys from ovbuilder (base64 metadata/userdata).
   guestinfo = var.guestinfo_extra_config
 }
@@ -31,9 +43,26 @@ data "vsphere_datacenter" "dc" {
   name = var.datacenter
 }
 
+data "vsphere_datacenter" "template_dc" {
+  count = local.template_dc_is_remote ? 1 : 0
+  name  = local.template_dc_name
+}
+
 data "vsphere_compute_cluster" "cluster" {
+  count         = local.is_host ? 0 : 1
   name          = var.cluster
   datacenter_id = data.vsphere_datacenter.dc.id
+}
+
+data "vsphere_host" "host" {
+  count         = local.is_host ? 1 : 0
+  name          = var.cluster
+  datacenter_id = data.vsphere_datacenter.dc.id
+}
+
+locals {
+  resource_pool_id = local.is_host ? data.vsphere_host.host[0].resource_pool_id : data.vsphere_compute_cluster.cluster[0].resource_pool_id
+  host_system_id   = local.is_host ? data.vsphere_host.host[0].id : null
 }
 
 data "vsphere_datastore_cluster" "vm_dsc" {
@@ -64,7 +93,7 @@ data "vsphere_network" "networks" {
 data "vsphere_virtual_machine" "template" {
   count         = local.is_clone ? 1 : 0
   name          = var.template_name
-  datacenter_id = data.vsphere_datacenter.dc.id
+  datacenter_id = local.template_dc_is_remote ? data.vsphere_datacenter.template_dc[0].id : data.vsphere_datacenter.dc.id
 }
 
 # ─── Golden clone path ───────────────────────────────────────────────────────
@@ -72,7 +101,8 @@ resource "vsphere_virtual_machine" "from_template" {
   count = local.is_clone ? 1 : 0
 
   name                 = var.vm_name
-  resource_pool_id     = data.vsphere_compute_cluster.cluster.resource_pool_id
+  resource_pool_id     = local.resource_pool_id
+  host_system_id       = local.host_system_id
   datastore_id         = local.use_dsc ? null : data.vsphere_datastore.vm_ds[0].id
   datastore_cluster_id = local.use_dsc ? data.vsphere_datastore_cluster.vm_dsc[0].id : null
   folder               = var.folder != "" ? var.folder : null
@@ -120,7 +150,8 @@ resource "vsphere_virtual_machine" "from_iso" {
   count = local.is_iso ? 1 : 0
 
   name                 = var.vm_name
-  resource_pool_id     = data.vsphere_compute_cluster.cluster.resource_pool_id
+  resource_pool_id     = local.resource_pool_id
+  host_system_id       = local.host_system_id
   datastore_id         = local.use_dsc ? null : data.vsphere_datastore.vm_ds[0].id
   datastore_cluster_id = local.use_dsc ? data.vsphere_datastore_cluster.vm_dsc[0].id : null
   folder               = var.folder != "" ? var.folder : null

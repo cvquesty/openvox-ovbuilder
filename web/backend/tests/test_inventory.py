@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.api import inventory as inventory_api
 from app.auth import get_current_user
 from app.models import Role, UserOut
+from ovbuilder.goldens import GoldenTemplate
 
 
 def _app_for(role: Role) -> FastAPI:
@@ -44,11 +45,48 @@ def test_environments_come_from_shared_mapping():
     assert by_key["prod"]["datastore_cluster"]
 
 
+from ovbuilder.goldens import GoldenTemplate
+
+
 def test_os_images_from_config():
     res = _client().get("/api/inventory/os-images")
     assert res.status_code == 200
     keys = {row["key"] for row in res.json()}
     assert "ubuntu-24.04" in keys
+
+
+def test_os_images_live_ovbuilder_only_omits_source_dc():
+    live = [
+        GoldenTemplate(
+            name="ovbuilder-ubuntu-24.04",
+            datacenter="PDXC",
+            datastore="HOTH_DEV",
+            key="ubuntu-24.04",
+            label="Ubuntu 24.04 LTS",
+            default_user="ubuntu",
+        )
+    ]
+
+    with patch.object(inventory_api, "vsphere_session", _session), patch.object(
+        inventory_api, "discover_goldens", return_value=live
+    ):
+        res = _client().get("/api/inventory/os-images")
+    assert res.status_code == 200
+    rows = res.json()
+    assert len(rows) == 1
+    assert rows[0]["name"] == "ovbuilder-ubuntu-24.04"
+    assert rows[0]["label"] == "Ubuntu 24.04 LTS"
+    assert "datacenter" not in rows[0]
+    assert "datastore" not in rows[0]
+
+
+def test_os_images_live_empty_does_not_invent_config_names():
+    with patch.object(inventory_api, "vsphere_session", _session), patch.object(
+        inventory_api, "discover_goldens", return_value=[]
+    ):
+        res = _client().get("/api/inventory/os-images")
+    assert res.status_code == 200
+    assert res.json() == []
 
 
 def test_clusters_live_success():

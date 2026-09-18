@@ -15,7 +15,9 @@ from app.tasks import (
 
 
 def test_build_command_uses_placement_mapping():
-    with patch("app.tasks.datastore_cluster_for", return_value="HOTH_PROD"):
+    with patch("app.tasks.datastore_cluster_for", return_value="HOTH_PROD"), patch(
+        "app.tasks.configured_datacenter", return_value=""
+    ):
         cmd, _env = _build_command(
             {
                 "hostname": "web-01",
@@ -35,7 +37,9 @@ def test_build_command_uses_placement_mapping():
 
 
 def test_build_command_omits_empty_datastore_cluster():
-    with patch("app.tasks.datastore_cluster_for", return_value=""):
+    with patch("app.tasks.datastore_cluster_for", return_value=""), patch(
+        "app.tasks.configured_datacenter", return_value=""
+    ):
         cmd, _env = _build_command(
             {
                 "hostname": "web-01",
@@ -47,6 +51,26 @@ def test_build_command_omits_empty_datastore_cluster():
         )
     assert "--vm-datastore-cluster" not in cmd
     assert "--cluster" not in cmd
+    assert "--datacenter" not in cmd
+
+
+def test_build_command_passes_inventory_datacenter():
+    with patch("app.tasks.datastore_cluster_for", return_value=""), patch(
+        "app.tasks.configured_datacenter", return_value="SEA3 - Bellevue"
+    ):
+        cmd, _env = _build_command(
+            {
+                "hostname": "web-01",
+                "ip": "10.0.0.10",
+                "os_image": "ubuntu-24.04",
+                "environment": "dev",
+                "cluster": "esx1.sea3.office.example.net",
+            },
+            "job-3",
+        )
+    assert cmd[cmd.index("--datacenter") + 1] == "SEA3 - Bellevue"
+    assert cmd[cmd.index("--cluster") + 1] == "esx1.sea3.office.example.net"
+    assert cmd[cmd.index("--os") + 1] == "ubuntu-24.04"
 
 
 def test_status_poll_is_not_per_line():

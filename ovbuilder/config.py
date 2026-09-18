@@ -173,6 +173,11 @@ class OvbuilderConfig(BaseModel):
     golden_images: Dict[str, GoldenImage] = Field(
         default_factory=_default_golden_images
     )
+    # When the same ovbuilder-* template name exists in more than one
+    # datacenter, prefer this DC silently (never shown in the OS picker).
+    # Empty = newest, then first by datacenter name. Overlay with
+    # OVBUILDER_GOLDEN_HOME_DATACENTER.
+    golden_home_datacenter: str = ""
     # Named environments for the web form / worker. Key is ``dev`` / ``prod``.
     # datastore_cluster is the Storage DRS target; operators never pick a LUN.
     environments: Dict[str, EnvironmentProfile] = Field(
@@ -268,6 +273,8 @@ class ConfigManager:
             cfg.openvox_server = srv
         if mode := os.environ.get("OVBUILDER_PROVISION_MODE"):
             cfg.provision_mode = mode.strip().lower()
+        if home_dc := os.environ.get("OVBUILDER_GOLDEN_HOME_DATACENTER"):
+            cfg.golden_home_datacenter = home_dc.strip()
 
         return cfg
 

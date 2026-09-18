@@ -19,6 +19,8 @@ module "vm" {
 
   provision_mode         = var.provision_mode
   template_name          = var.template_name
+  template_datacenter    = var.template_datacenter
+  compute_type           = var.compute_type
   guestinfo_extra_config = var.guestinfo_extra_config
   guest_id               = var.guest_id
 

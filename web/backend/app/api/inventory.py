@@ -1,11 +1,14 @@
 """Live vSphere inventory for the build form.
 
-OS images and environment → datastore-cluster mapping come from ovbuilder
-config (single source of truth). Clusters, networks, datacenters, and
-datastore clusters are listed live via ``ovbuilder.vsphere``.
+OS images are live ``ovbuilder-*`` templates discovered across every
+datacenter (config goldens are the vCenter-down fallback). Environment →
+datastore-cluster mapping comes from ovbuilder config. Clusters, networks,
+datacenters, and datastore clusters are listed live via ``ovbuilder.vsphere``.
 
 Live endpoints return HTTP 502 with a clear message when vCenter is
 unreachable or credentials are missing — they never invent fake names.
+OS images are the exception: a failed scan falls back to configured
+``ovbuilder-*`` goldens so the form still renders.
 """
 
 from __future__ import annotations
@@ -15,10 +18,14 @@ from typing import Callable, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from ovbuilder import vsphere
+from ovbuilder.goldens import (
+    discover_goldens,
+    public_os_rows,
+    public_os_rows_from_config,
+)
 from ovbuilder.placement import (
     default_environments,
     environments_as_dicts,
-    os_images_as_dicts,
 )
 
 from ..auth import require_builder
@@ -30,8 +37,18 @@ router = APIRouter()
 
 # Last-resort OS rows when CLI config cannot be loaded (matches CLI defaults).
 _FALLBACK_OS = [
-    {"key": "ubuntu-24.04", "label": "Ubuntu 24.04 LTS", "default_user": "ubuntu"},
-    {"key": "almalinux-10", "label": "AlmaLinux 10", "default_user": "almalinux"},
+    {
+        "key": "ubuntu-24.04",
+        "label": "Ubuntu 24.04 LTS",
+        "default_user": "ubuntu",
+        "name": "ovbuilder-ubuntu-24.04",
+    },
+    {
+        "key": "almalinux-10",
+        "label": "AlmaLinux 10",
+        "default_user": "almalinux",
+        "name": "ovbuilder-almalinux-10",
+    },
 ]
 
 
@@ -91,8 +108,20 @@ def _list_live(list_fn: Callable, *, needs_dc: bool = True) -> List[str]:
 
 @router.get("/os-images")
 async def os_images(_user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
+    """Live ovbuilder-* templates (name + label). Source DC is not returned."""
     try:
-        rows = os_images_as_dicts()
+        with vsphere_session() as (si, _datacenter):
+            goldens = discover_goldens(si)
+        return public_os_rows(goldens)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.debug(
+            "os-images: live inventory unavailable, using config fallback",
+            exc_info=True,
+        )
+    try:
+        rows = public_os_rows_from_config()
         if rows:
             return rows
     except Exception:

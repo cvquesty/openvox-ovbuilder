@@ -83,6 +83,18 @@ variable "template_name" {
   default     = ""
 }
 
+variable "template_datacenter" {
+  description = "Datacenter that holds the golden template. Empty = vsphere_datacenter (VM placement DC)."
+  type        = string
+  default     = ""
+}
+
+variable "compute_type" {
+  description = "cluster = DRS cluster (ATLC/PDXC); host = standalone ESXi (SEA3)."
+  type        = string
+  default     = "cluster"
+}
+
 variable "guestinfo_extra_config" {
   description = "cloud-init guestinfo map (base64 payloads) for clone mode"
   type        = map(string)

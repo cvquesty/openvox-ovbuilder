@@ -21,7 +21,7 @@ environment and this mapping chooses the datastore cluster.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from .config import (
     EnvironmentProfile,
@@ -29,6 +29,7 @@ from .config import (
     _default_environments,
     get_config_manager,
 )
+from .goldens import public_os_rows_from_config
 
 
 def default_environments() -> Dict[str, EnvironmentProfile]:
@@ -134,29 +135,5 @@ def datastore_cluster_for(
 
 
 def os_images_as_dicts(cfg: Optional[OvbuilderConfig] = None) -> List[Dict[str, str]]:
-    """JSON-ready golden-image rows for the web OS picker."""
-    if cfg is None:
-        cfg = get_config_manager().load_config()
-    images = getattr(cfg, "golden_images", None) or {}
-    rows: List[Dict[str, str]] = []
-    for key, meta in images.items():
-        if hasattr(meta, "model_dump"):
-            data: Dict[str, Any] = meta.model_dump()
-        elif isinstance(meta, dict):
-            data = meta
-        else:
-            data = {}
-        rows.append(
-            {
-                "key": str(key),
-                "label": str(
-                    data.get("description")
-                    or data.get("label")
-                    or key
-                ),
-                "default_user": str(
-                    data.get("default_user") or data.get("user") or ""
-                ),
-            }
-        )
-    return rows
+    """JSON-ready golden-image rows for the web OS picker (ovbuilder-* only)."""
+    return public_os_rows_from_config(cfg)

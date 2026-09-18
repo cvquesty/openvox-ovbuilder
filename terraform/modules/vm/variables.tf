@@ -44,6 +44,22 @@ variable "template_name" {
   default     = ""
 }
 
+variable "template_datacenter" {
+  description = "Datacenter that holds the golden. Empty = same as the VM placement datacenter."
+  type        = string
+  default     = ""
+}
+
+variable "compute_type" {
+  description = "cluster (DRS) or host (standalone ESXi resource pool)"
+  type        = string
+  default     = "cluster"
+  validation {
+    condition     = contains(["cluster", "host"], var.compute_type)
+    error_message = "compute_type must be \"cluster\" or \"host\"."
+  }
+}
+
 variable "iso_datastore" {
   description = "Datastore containing OS ISOs (iso mode). Defaults to vm_datastore."
   type        = string

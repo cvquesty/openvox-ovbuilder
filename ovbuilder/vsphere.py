@@ -200,6 +200,101 @@ def list_clusters(si, datacenter_name: str) -> List[str]:
     return sorted(names)
 
 
+def classify_compute(si, datacenter_name: str, name: str) -> str:
+    """
+    Return ``cluster`` or ``host`` for a name from ``list_clusters``.
+
+    ClusterComputeResource is a ComputeResource subclass, so the cluster
+    check must run first. Unknown names default to ``cluster`` so ATLC/PDXC
+    keep using ``vsphere_compute_cluster``.
+    """
+    if not name:
+        return "cluster"
+    dc = _find_datacenter(si, datacenter_name)
+    if not dc:
+        return "cluster"
+    for item in dc.hostFolder.childEntity:
+        if getattr(item, "name", None) != name:
+            continue
+        if isinstance(item, vim.ClusterComputeResource):
+            return "cluster"
+        if isinstance(item, vim.ComputeResource):
+            return "host"
+    return "cluster"
+
+
+def _datacenter_name_for(entity) -> str:
+    """Walk the inventory parent chain until a Datacenter is found."""
+    current = entity
+    seen = 0
+    while current is not None and seen < 32:
+        seen += 1
+        try:
+            if isinstance(current, vim.Datacenter):
+                return current.name or ""
+            current = getattr(current, "parent", None)
+        except Exception:
+            return ""
+    return ""
+
+
+def _vm_datastore_name(vm) -> str:
+    """Best-effort first datastore name attached to a VM/template."""
+    try:
+        stores = getattr(vm, "datastore", None) or []
+        for store in stores:
+            name = getattr(store, "name", None)
+            if name:
+                return str(name)
+    except Exception:
+        return ""
+    return ""
+
+
+def list_golden_templates(si) -> List[dict]:
+    """
+    Return ``ovbuilder-*`` VM templates from every datacenter.
+
+    Each dict is internal (name, datacenter, datastore, guest_id, uuid,
+    created, change_version). Callers must not show DC/datastore in pickers.
+    Non-templates and names outside the ``ovbuilder-`` prefix are skipped.
+    """
+    content = _content(si)
+    view = content.viewManager.CreateContainerView(
+        content.rootFolder, [vim.VirtualMachine], True
+    )
+    found: List[dict] = []
+    try:
+        for vm in view.view:
+            try:
+                name = getattr(vm, "name", None) or ""
+                if not str(name).startswith("ovbuilder-"):
+                    continue
+                cfg = getattr(vm, "config", None)
+                if cfg is None or not getattr(cfg, "template", False):
+                    continue
+                created = getattr(cfg, "createDate", None)
+                found.append(
+                    {
+                        "name": str(name),
+                        "datacenter": _datacenter_name_for(vm),
+                        "datastore": _vm_datastore_name(vm),
+                        "guest_id": str(getattr(cfg, "guestId", None) or ""),
+                        "uuid": str(getattr(cfg, "uuid", None) or ""),
+                        "created": created,
+                        "change_version": str(
+                            getattr(cfg, "changeVersion", None) or ""
+                        ),
+                    }
+                )
+            except Exception:
+                # Inaccessible / permission-denied VMs are skipped.
+                continue
+    finally:
+        view.Destroy()
+    return found
+
+
 def list_datastores(si, datacenter_name: str) -> List[str]:
     """Return sorted datastore names attached to the datacenter."""
     dc = _find_datacenter(si, datacenter_name)

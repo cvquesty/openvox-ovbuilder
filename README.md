@@ -4,7 +4,7 @@
 
 **Build OpenVox-ready VMware VMs from Packer golden templates (or a legacy ISO) — without memorizing Terraform every time.**
 
-[![Version](https://img.shields.io/badge/version-0.97--beta29-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.97--beta31-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Terraform](https://img.shields.io/badge/Terraform-1.5%2B-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)](https://terraform.io)
@@ -157,7 +157,7 @@ You will be asked for:
 
 - vCenter hostname and login
 - Datacenter, compute cluster, datastore cluster (or single datastore), network(s)
-- OS (golden template), or ISO if you chose legacy mode
+- OS (live `ovbuilder-*` golden template — name + short label only), or ISO if you chose legacy mode
 - Hostname, IP, subnet prefix, optional gateway/DNS
 - CPU, memory (GB), disk (GB, always thin-provisioned)
 
@@ -168,7 +168,7 @@ Confirm, then Terraform runs. When it finishes, the VM is cloned and powered on.
 ```text
 ovbuilder build
   → discover vSphere inventory
-  → select OS (AlmaLinux 10 / Ubuntu 24.04 template)
+  → select OS (live ovbuilder-* templates; source DC is silent)
   → interview hostname / IP / sizing
   → terraform clone + cloud-init guestinfo
   → cloud-init sets identity + (on Alma) DNF groups
@@ -237,7 +237,7 @@ ovbuilder build --yes --mode iso \
 | Flag | Meaning |
 |------|---------|
 | `--mode golden` / `--mode iso` | Clone template (default) or attach ISO |
-| `--os almalinux-10` | Golden image key (non-interactive golden) |
+| `--os almalinux-10` | Golden key or `ovbuilder-*` template name (live inventory) |
 | `--iso path/to.iso` | Datastore-relative ISO path (ISO mode) |
 | `--hostname` / `--ip` | Guest identity |
 | `--prefix` / `--cidr` | Subnet as `24`, `/19`, or `255.255.224.0` |
@@ -245,6 +245,7 @@ ovbuilder build --yes --mode iso \
 | `--dns` | DNS server (repeat or comma-separate; interactive: one per prompt until empty) |
 | `--cpus` / `--memory` / `--disk` | Size (memory in **GB**) |
 | `--location ATLC` | Site code (ATLC, PDXC). Picks local compiler VIP + GUI repo |
+| `--cluster` | Compute cluster or standalone ESXi host |
 | `--skip-dnf-groups` | Do not install configured EL package groups |
 | `--yes` / `-y` | No prompts (requires hostname, IP, and OS or ISO) |
 | `-V` / `--version` | Print version |
@@ -300,6 +301,9 @@ networks:
   - "VM Production"
 datacenter: "Main DC"
 cluster: "Production Cluster"
+# Silent only: when the same ovbuilder-* template exists in more than one
+# datacenter, prefer this one. Empty = newest, then first by name.
+# golden_home_datacenter: "PDXC"
 
 # Web + worker: environment key → Storage DRS cluster (never a LUN).
 # Overlay with OVBUILDER_ENV_<KEY>_DATASTORE_CLUSTER if needed.
@@ -360,6 +364,7 @@ known_isos:
 | `OVBUILDER_ISO_DATASTORE` | Default ISO datastore |
 | `OVBUILDER_OPENVOX_SERVER` | OpenVox compile/CA host for agent install |
 | `OVBUILDER_PROVISION_MODE` | `golden` or `iso` |
+| `OVBUILDER_GOLDEN_HOME_DATACENTER` | Preferred DC when the same `ovbuilder-*` name exists in more than one (silent) |
 | `OVBUILDER_GOLDEN_PASSWORD` | Guest login password when password SSH is opted in (see SECRETS.md) |
 | `OVBUILDER_ALLOW_PASSWORD_SSH` | Set to `1`/`true` to enable clone-time SSH password auth (default off) |
 | `OVBUILDER_SSH_AUTHORIZED_KEYS` | OpenSSH public keys for clone guestinfo (preferred) |
@@ -402,7 +407,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta30` |
+| ovbuilder CLI | `0.97-beta31` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
