@@ -29,12 +29,15 @@ Clone-time ``/usr/local/sbin/ovbuilder-net.sh`` applies interview data:
     ``cloud-init ens33``), delete spare ethernet profiles, bring it up.
   * **Fallback**: ``ip addr`` / ``ip route`` if neither stack is available.
 
-Hostname / passwords still come from metadata + user-data as usual.
+Hostname still comes from metadata + user-data. SSH password auth is
+**off** unless the operator opts in; root stays locked. Prefer injecting
+``ssh_authorized_keys`` for clone access.
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import shlex
 from typing import Optional, Sequence, Union
 
@@ -46,7 +49,29 @@ from .openvox_site import (
     parse_proxy_url,
 )
 from .packages import build_dnf_groupinstall_script, sanitize_dnf_groups
-from .secrets import get_golden_password, get_http_proxy, require_golden_password
+from .secrets import (
+    allow_password_ssh as password_ssh_opted_in,
+    get_golden_password,
+    get_http_proxy,
+    get_ssh_authorized_keys_raw,
+    require_golden_password,
+)
+
+# Public key prefixes only — private-key PEM is rejected in normalize().
+_SSH_PUBKEY_PREFIXES = (
+    "ssh-ed25519 ",
+    "ssh-ed25519-cert-v01@",
+    "ssh-rsa ",
+    "ssh-rsa-cert-v01@",
+    "ecdsa-sha2-nistp256 ",
+    "ecdsa-sha2-nistp384 ",
+    "ecdsa-sha2-nistp521 ",
+    "ecdsa-sha2-nistp256-cert-v01@",
+    "ecdsa-sha2-nistp384-cert-v01@",
+    "ecdsa-sha2-nistp521-cert-v01@",
+    "sk-ssh-ed25519@",
+    "sk-ecdsa-sha2-nistp256@",
+)
 
 
 def _b64(s: str) -> str:
@@ -298,6 +323,48 @@ fi
 """
 
 
+def normalize_ssh_authorized_keys(
+    keys: Optional[Union[str, Sequence[str]]] = None,
+) -> list[str]:
+    """
+    Return unique SSH **public** keys. Private-key material is dropped.
+    """
+    if keys is None:
+        return []
+    if isinstance(keys, str):
+        raw_lines = keys.replace("\r\n", "\n").replace("\\n", "\n").split("\n")
+    else:
+        raw_lines: list[str] = []
+        for item in keys:
+            if item is None:
+                continue
+            raw_lines.extend(str(item).replace("\r\n", "\n").split("\n"))
+    out: list[str] = []
+    seen: set[str] = set()
+    skip_block = False
+    for raw in raw_lines:
+        line = raw.strip()
+        if not line:
+            skip_block = False
+            continue
+        upper = line.upper()
+        if "PRIVATE KEY" in upper or line.startswith("-----BEGIN"):
+            skip_block = True
+            continue
+        if skip_block:
+            if line.startswith("-----END"):
+                skip_block = False
+            continue
+        if line.startswith("#"):
+            continue
+        if not line.startswith(_SSH_PUBKEY_PREFIXES):
+            continue
+        if line not in seen:
+            seen.add(line)
+            out.append(line)
+    return out
+
+
 def build_agent_install_script(site: OpenVoxSite) -> str:
     """Bash wrapper around the GUI install.bash clustered flags."""
     cmd = agent_install_command(site)
@@ -320,12 +387,20 @@ def build_userdata(
     dnf_groups: Optional[list] = None,
     http_proxy: Optional[str] = None,
     openvox_site: Optional[OpenVoxSite] = None,
+    allow_password_ssh: bool = False,
+    ssh_authorized_keys: Optional[Union[str, Sequence[str]]] = None,
 ) -> str:
     """
-    Build cloud-init **user-data**: hostname, optional passwords, net apply.
+    Build cloud-init **user-data**: hostname, net apply, optional SSH keys.
 
-    ``password`` must come from the operator (env / secrets.env). If omitted,
-    chpasswd blocks are not emitted (network + hostname still apply).
+    Defaults keep Packer golden hardening:
+
+    * ``ssh_pwauth: false`` (key-based SSH)
+    * ``disable_root: true`` (root stays locked; never in chpasswd)
+    * no password injection unless ``allow_password_ssh`` and ``password``
+
+    ``password`` must come from the operator (env / secrets.env). It is never
+    a hard-coded default. Root is never unlocked.
     """
     fqdn = f"{hostname}.{domain}" if domain else hostname
     script = _network_configure_script(
@@ -336,7 +411,8 @@ def build_userdata(
         f"      {line}" if line else "      " for line in body_lines
     )
     user = (default_user or "ubuntu").strip() or "ubuntu"
-    pw = (password or "").strip()
+    pw = (password or "").strip() if allow_password_ssh else ""
+    keys = normalize_ssh_authorized_keys(ssh_authorized_keys)
     groups = sanitize_dnf_groups(dnf_groups)
     dnf_script = build_dnf_groupinstall_script(groups) if groups else ""
     dnf_block = ""
@@ -354,17 +430,21 @@ def build_userdata(
         "manage_etc_hosts: true",
         "package_update: false",
         "package_upgrade: false",
-        "ssh_pwauth: true",
-        "disable_root: false",
+        f"ssh_pwauth: {'true' if pw else 'false'}",
+        "disable_root: true",
     ]
+    if keys:
+        lines.append("ssh_authorized_keys:")
+        for key in keys:
+            lines.append(f"  - {json.dumps(key)}")
     if pw:
         # Password never hard-coded in the repo — supplied at runtime only.
+        # Default user only; root stays locked (no root chpasswd).
         lines += [
             "chpasswd:",
             "  expire: false",
             "  list: |",
             f"    {user}:{pw}",
-            f"    root:{pw}",
         ]
     lines += [
         "# Guest OS network is applied by ovbuilder-net.sh (netplan or nmcli).",
@@ -422,12 +502,11 @@ def build_userdata(
         f"  - [hostnamectl, set-hostname, {hostname}]",
     ]
     if pw:
-        # shlex-safe single quotes inside the bash -c string
+        # User only. Root is never unlocked at clone time.
         safe_user = user.replace("'", "")
         safe_pw = pw.replace("'", "'\\''")
         lines.append(
-            f"  - [bash, -c, \"echo '{safe_user}:{safe_pw}' | chpasswd; "
-            f"echo 'root:{safe_pw}' | chpasswd\"]"
+            f"  - [bash, -c, \"echo '{safe_user}:{safe_pw}' | chpasswd\"]"
         )
     lines += [
         "  - [/usr/local/sbin/ovbuilder-net.sh]",
@@ -458,18 +537,34 @@ def guestinfo_extra_config(
     dnf_groups: Optional[list] = None,
     http_proxy: Optional[str] = None,
     openvox_site: Optional[OpenVoxSite] = None,
+    allow_password_ssh: Optional[bool] = None,
+    ssh_authorized_keys: Optional[Union[str, Sequence[str]]] = None,
     *,
-    require_password: bool = True,
+    require_password: Optional[bool] = None,
 ) -> dict:
     """
     Return a dict for Terraform ``extra_config`` / ``guestinfo_extra_config``.
 
-    Password is resolved from ``password`` arg or local secrets / env
-    (see ``ovbuilder.secrets``). Never from a default in source control.
+    Password SSH is off unless ``allow_password_ssh`` (or
+    ``OVBUILDER_ALLOW_PASSWORD_SSH``). When opted in, the password comes from
+    ``password`` / local secrets / env — never a default in source control.
+    SSH public keys come from ``ssh_authorized_keys`` or operator key files.
     """
-    pw = (password or "").strip() or get_golden_password()
-    if require_password and not pw:
-        pw = require_golden_password("golden clone guestinfo")
+    allow = (
+        allow_password_ssh
+        if allow_password_ssh is not None
+        else password_ssh_opted_in()
+    )
+    if ssh_authorized_keys is None:
+        keys: Optional[Union[str, Sequence[str]]] = get_ssh_authorized_keys_raw()
+    else:
+        keys = ssh_authorized_keys
+    pw = ""
+    if allow:
+        pw = (password or "").strip() or (get_golden_password() or "")
+        need_pw = True if require_password is None else require_password
+        if need_pw and not pw:
+            pw = require_golden_password("golden clone guestinfo")
     proxy = (http_proxy or "").strip() or (get_http_proxy() or "")
     meta = build_metadata(hostname, domain=domain)
     user = build_userdata(
@@ -480,10 +575,12 @@ def guestinfo_extra_config(
         dns=dns,
         domain=domain,
         default_user=default_user,
-        password=pw,
+        password=pw or None,
         dnf_groups=dnf_groups,
         http_proxy=proxy or None,
         openvox_site=openvox_site,
+        allow_password_ssh=allow,
+        ssh_authorized_keys=keys,
     )
     return {
         "guestinfo.metadata": _b64(meta),

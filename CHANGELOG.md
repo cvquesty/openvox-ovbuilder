@@ -5,6 +5,22 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta29] - 2026-09-18
+
+### Security
+
+- **Harden clone-time cloud-init SSH defaults.** Guestinfo user-data now
+  sets `ssh_pwauth: false` and `disable_root: true`. Root is never listed
+  in `chpasswd` and is never unlocked in runcmd. Password SSH is opt-in
+  (`OVBUILDER_ALLOW_PASSWORD_SSH`) and, when enabled, applies only to the
+  golden default user from operator secrets — never a hard-coded password.
+  Prefer `~/.config/ovbuilder/authorized_keys` or
+  `OVBUILDER_SSH_AUTHORIZED_KEYS` for clone access. Private-key material
+  is rejected. Residual risk: published Packer templates may still allow
+  password SSH until rebuilt with #36; opt-in clone password auth does not
+  expire the user password; guestinfo extraConfig holds that password while
+  the VM exists.
+
 ## [0.97-beta28] - 2026-09-18
 
 ### Security

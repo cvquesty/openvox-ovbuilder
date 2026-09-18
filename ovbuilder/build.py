@@ -50,6 +50,7 @@ from .network import (
     prefix_to_netmask,
 )
 from .secrets import (
+    allow_password_ssh,
     get_golden_password,
     get_vsphere_password,
     golden_password_setup_help,
@@ -63,7 +64,7 @@ console = Console()
 
 def _ensure_golden_password_configured() -> None:
     """
-    Fail early in golden mode if no local secrets file / env password.
+    Fail early when password SSH is opted in but no local password is set.
 
     Prints a clear panel with the resolved secrets path and platform-specific
     setup steps so the operator is not surprised mid-interview.
@@ -74,7 +75,8 @@ def _ensure_golden_password_configured() -> None:
     console.print(
         Panel.fit(
             "[bold red]Golden password not configured[/bold red]\n\n"
-            "Clones need a guest login password from a [bold]local[/bold] secrets "
+            "Password SSH is opted in ([bold]OVBUILDER_ALLOW_PASSWORD_SSH[/bold]), so "
+            "clones need a guest login password from a [bold]local[/bold] secrets "
             "file (never committed to git).\n\n"
             f"Expected file: [cyan]{path}[/cyan]\n\n"
             "See the printed commands below (UNIX and Windows), then re-run:\n"
@@ -356,9 +358,9 @@ def build(
     tf_dir = get_config_manager().get_effective_terraform_dir()
     provision_mode = _normalize_provision_mode(mode, cfg.provision_mode)
 
-    # Golden clones inject guest password via cloud-init — require local secrets
-    # before any interview / vCenter work so the operator sees the fix first.
-    if provision_mode == "golden":
+    # Password SSH is opt-in. Only then require a local golden password
+    # before interview / vCenter work so the operator sees the fix first.
+    if provision_mode == "golden" and allow_password_ssh():
         _ensure_golden_password_configured()
 
     # Interactive when required identity pieces are missing (unless -y).
@@ -755,6 +757,7 @@ def build(
             default_user=default_user,
             dnf_groups=dnf_groups,
             openvox_site=ov_site,
+            allow_password_ssh=allow_password_ssh(),
         )
 
     # Map CLI golden → Terraform clone; keep iso as iso.
@@ -847,7 +850,8 @@ def build(
                 f"• Identity (cloud-init): [bold]{hostname}[/bold] @ "
                 f"[bold]{ip}/{prefix_len}[/bold]\n"
                 f"• SSH when Tools/network settle: "
-                f"[bold]{default_user}@{ip}[/bold]\n"
+                f"[bold]{default_user}@{ip}[/bold] "
+                "(key-based by default; password SSH is opt-in)\n"
                 f"• OpenVox: location [bold]{location or 'unset'}[/bold] "
                 f"server=[bold]{ov_site.compiler if ov_site else cfg.openvox_server}[/bold] "
                 f"ca=[bold]{ov_site.ca_server if ov_site else 'ovca.corp.int-x.ai'}[/bold]\n\n"
@@ -863,6 +867,12 @@ def build(
             "(only if ACLs already allow access to the server)",
             default=False,
         ):
+            if not allow_password_ssh():
+                console.print(
+                    "[yellow]Clone-time SSH password auth is off by default. "
+                    "This prompt only works if the guest already has your key "
+                    "or you set OVBUILDER_ALLOW_PASSWORD_SSH=1 and rebuilt.[/yellow]"
+                )
             ssh_user = Prompt.ask("SSH username", default=default_user)
             ssh_pass = Prompt.ask("SSH password", password=True)
             # configure_network=False: cloud-init already applied identity.

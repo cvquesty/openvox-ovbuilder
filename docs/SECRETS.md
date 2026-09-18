@@ -10,7 +10,8 @@ This guide covers **macOS, Linux, and Windows**.
 
 | Secret | Local only (not in git) | Used by |
 |--------|-------------------------|---------|
-| Golden / clone login password | `secrets.env` or `OVBUILDER_GOLDEN_PASSWORD` | `ovbuilder build` (cloud-init guestinfo) |
+| Golden / clone login password | `secrets.env` or `OVBUILDER_GOLDEN_PASSWORD` | Only if `OVBUILDER_ALLOW_PASSWORD_SSH` is set |
+| Clone SSH public keys | `authorized_keys` file or `OVBUILDER_SSH_AUTHORIZED_KEYS` | `ovbuilder build` (cloud-init guestinfo) |
 | HTTP/HTTPS proxy (with auth) | `secrets.env` `OVBUILDER_HTTP_PROXY` | Clone-time apt/dnf/profile.d |
 | Packer vCenter + golden password | `packer/variables.auto.pkrvars.hcl` (gitignored) | `packer build` |
 | vSphere password for ovbuilder | CLI prompt, env (`VSPHERE_PASSWORD` / `OVBUILDER_VSPHERE_PASSWORD` / `TF_VAR_vsphere_password`), or `secrets.env`. Avoid `--vsphere-password` (visible in `ps`) | Terraform + web worker |
@@ -28,17 +29,45 @@ This guide covers **macOS, Linux, and Windows**.
 
 File name: `secrets.env`
 
-## Golden password (clones)
+## Clone SSH access (preferred: keys)
 
-Every golden clone injects a guest login password via cloud-init. That
-password must come from **your machine**, not from the repository.
+Clone-time cloud-init defaults to **key-based SSH**: `ssh_pwauth: false`,
+`disable_root: true`, and **no** `chpasswd` (root stays locked). Put your
+public keys in the config directory:
+
+```bash
+mkdir -p ~/.config/ovbuilder
+chmod 700 ~/.config/ovbuilder
+# One OpenSSH public key per line. Never put a private key here.
+cat ~/.ssh/id_ed25519.pub >> ~/.config/ovbuilder/authorized_keys
+chmod 600 ~/.config/ovbuilder/authorized_keys
+```
+
+Or for one shell session:
+
+```bash
+export OVBUILDER_SSH_AUTHORIZED_KEYS="$(cat ~/.ssh/id_ed25519.pub)"
+```
+
+Override the file path with `OVBUILDER_SSH_AUTHORIZED_KEYS_FILE`.
+
+## Golden password (opt-in password SSH)
+
+Password SSH on clones is **off by default**. Set
+`OVBUILDER_ALLOW_PASSWORD_SSH=1` only for a documented bootstrap window.
+When opted in, cloud-init may set the **default user** password from
+`OVBUILDER_GOLDEN_PASSWORD` / `secrets.env` and enable `ssh_pwauth`.
+Root is never unlocked and is never listed in `chpasswd`.
+
+That password must come from **your machine**, not from the repository.
 
 ### macOS / Linux / WSL / Git Bash
 
 ```bash
 mkdir -p ~/.config/ovbuilder
 chmod 700 ~/.config/ovbuilder
-printf "%s\n" "OVBUILDER_GOLDEN_PASSWORD=" > ~/.config/ovbuilder/secrets.env
+printf "%s\n" "OVBUILDER_ALLOW_PASSWORD_SSH=1" "OVBUILDER_GOLDEN_PASSWORD=" \
+  > ~/.config/ovbuilder/secrets.env
 chmod 600 ~/.config/ovbuilder/secrets.env
 # Edit the file and put your local lab password after the equals.
 # Never commit secrets.env.
@@ -47,6 +76,7 @@ chmod 600 ~/.config/ovbuilder/secrets.env
 Or for one shell session only (set the value in your shell, not in git):
 
 ```bash
+export OVBUILDER_ALLOW_PASSWORD_SSH=1
 export OVBUILDER_GOLDEN_PASSWORD=
 # then assign your local lab password in that same shell
 ovbuilder build
@@ -57,13 +87,17 @@ ovbuilder build
 ```powershell
 $dir = Join-Path $env:APPDATA "ovbuilder"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-Set-Content -Path (Join-Path $dir "secrets.env") -Value "OVBUILDER_GOLDEN_PASSWORD="
+Set-Content -Path (Join-Path $dir "secrets.env") -Value @(
+  "OVBUILDER_ALLOW_PASSWORD_SSH=1",
+  "OVBUILDER_GOLDEN_PASSWORD="
+)
 # Edit the file and put your local lab password after the equals.
 ```
 
 Or for one PowerShell session only (set the value in your session, not in git):
 
 ```powershell
+$env:OVBUILDER_ALLOW_PASSWORD_SSH = '1'
 $env:OVBUILDER_GOLDEN_PASSWORD = ''
 # then assign your local lab password in that same session
 ovbuilder build
@@ -74,8 +108,9 @@ ovbuilder build
 Same directory, file `secrets.yaml`. Create the file locally and set
 `golden_password` there. Do not put a real value in git.
 
-If the password is unset, golden clone **stops early** with setup instructions
-instead of using a hard-coded default.
+If password SSH is opted in and the password is unset, golden clone
+**stops early** with setup instructions instead of using a hard-coded
+default.
 
 ## HTTP proxy (clone time)
 
@@ -96,11 +131,13 @@ IP so the CA, compilers, and GUI never go through Squid.
 
 ## Packer golden builds
 
-Packer needs vCenter credentials and the same guest password you will use
-for clones. Templates do **not** bake a well-known default password; they
-substitute `ssh_password` / `ssh_password_crypted` from this local file.
-Root is locked on the golden. The admin user (`ubuntu` / `almalinux`) uses
-password-required sudo.
+Packer needs vCenter credentials and the guest password for the golden
+admin user (console login). Templates do **not** bake a well-known default
+password; they substitute `ssh_password` / `ssh_password_crypted` from this
+local file. Root is locked on the golden. The admin user (`ubuntu` /
+`almalinux`) uses password-required sudo. Clone-time SSH prefers keys;
+that Packer password is only re-applied at clone time if
+`OVBUILDER_ALLOW_PASSWORD_SSH` is set.
 
 ```bash
 cd packer

@@ -142,7 +142,8 @@ Via `guestinfo.metadata` / `guestinfo.userdata` (cloud-init):
 
 - hostname / FQDN
 - static IPv4 address + prefix, gateway, DNS
-- guest password (from `OVBUILDER_GOLDEN_PASSWORD` / `secrets.env`)
+- SSH public keys from `~/.config/ovbuilder/authorized_keys` (or `OVBUILDER_SSH_AUTHORIZED_KEYS`)
+- optional default-user password **only** if `OVBUILDER_ALLOW_PASSWORD_SSH` is set (root stays locked)
 - EL DNF group install script (Alma only, if `dnf_groups` is non-empty)
 
 ## Point ovbuilder at the templates

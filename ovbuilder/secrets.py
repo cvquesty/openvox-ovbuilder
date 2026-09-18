@@ -7,6 +7,11 @@ Resolution order for the golden / clone login password
 2. Local env-file: ``<config_dir>/secrets.env`` (mode 0600 when the OS allows)
 3. Local YAML: ``<config_dir>/secrets.yaml`` key ``golden_password``
 
+Clone-time SSH password auth is **off by default**. The golden password is
+only consumed when ``OVBUILDER_ALLOW_PASSWORD_SSH`` is truthy (env or
+``secrets.env``). Prefer ``<config_dir>/authorized_keys`` (or
+``OVBUILDER_SSH_AUTHORIZED_KEYS``) for key-based access.
+
 ``config_dir`` is platform-aware (see ``ovbuilder.paths.config_dir``).
 
 vSphere credentials stay interactive / CLI flags / env
@@ -29,6 +34,11 @@ from .paths import config_dir, is_windows
 # Public env name — operators export this in CI or shell.
 ENV_GOLDEN_PASSWORD = "OVBUILDER_GOLDEN_PASSWORD"
 ENV_HTTP_PROXY = "OVBUILDER_HTTP_PROXY"
+# Opt-in clone SSH password auth (default is key-based / ssh_pwauth: false).
+ENV_ALLOW_PASSWORD_SSH = "OVBUILDER_ALLOW_PASSWORD_SSH"
+ENV_SSH_AUTHORIZED_KEYS = "OVBUILDER_SSH_AUTHORIZED_KEYS"
+ENV_SSH_AUTHORIZED_KEYS_FILE = "OVBUILDER_SSH_AUTHORIZED_KEYS_FILE"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
 # vSphere password: env / secrets file, never argv when the web worker runs.
 ENV_VSPHERE_PASSWORD_KEYS = (
     "OVBUILDER_VSPHERE_PASSWORD",
@@ -95,6 +105,54 @@ def _parse_env_file(path: Path) -> dict[str, str]:
         if key:
             out[key] = val
     return out
+
+
+def _env_or_secrets(key: str) -> str:
+    """Env first, then the same key in ``secrets.env``. Never logged."""
+    val = os.environ.get(key, "").strip()
+    if val:
+        return val
+    env_file = secrets_env_path()
+    if env_file.is_file():
+        parsed = _parse_env_file(env_file)
+        return parsed.get(key, "").strip()
+    return ""
+
+
+def allow_password_ssh() -> bool:
+    """
+    True only when the operator opts into clone-time SSH password auth.
+
+    Default is false: clones keep ``ssh_pwauth: false`` and root locked.
+    """
+    return _env_or_secrets(ENV_ALLOW_PASSWORD_SSH).lower() in _TRUTHY
+
+
+def ssh_authorized_keys_file() -> Path:
+    """Operator public-key file (override via env / secrets.env)."""
+    override = _env_or_secrets(ENV_SSH_AUTHORIZED_KEYS_FILE)
+    if override:
+        return Path(override).expanduser()
+    return secrets_dir() / "authorized_keys"
+
+
+def get_ssh_authorized_keys_raw() -> str:
+    """
+    Concatenate public-key text from env / secrets.env and the keys file.
+
+    Parsing / private-key rejection happens in ``cloud_init``.
+    """
+    chunks: list[str] = []
+    inline = _env_or_secrets(ENV_SSH_AUTHORIZED_KEYS)
+    if inline:
+        chunks.append(inline.replace("\\n", "\n"))
+    path = ssh_authorized_keys_file()
+    if path.is_file():
+        try:
+            chunks.append(path.read_text(encoding="utf-8"))
+        except OSError:
+            pass
+    return "\n".join(chunks)
 
 
 def get_golden_password() -> Optional[str]:
