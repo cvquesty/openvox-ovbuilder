@@ -19,14 +19,11 @@ dnf -y install \
 systemctl enable vmtoolsd.service 2>/dev/null || systemctl enable open-vm-tools.service 2>/dev/null || true
 systemctl enable cloud-init.service cloud-init-local.service cloud-config.service cloud-final.service 2>/dev/null || true
 
-# Passwordless sudo for the admin user (created by kickstart)
-if id almalinux &>/dev/null; then
-  echo 'almalinux ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/almalinux
-  chmod 440 /etc/sudoers.d/almalinux
+# Password-required sudo via wheel. Do not grant NOPASSWD to build users.
+if getent group wheel >/dev/null; then
+  echo '%wheel ALL=(ALL) ALL' >/etc/sudoers.d/wheel
+  chmod 440 /etc/sudoers.d/wheel
 fi
-if id cloud-user &>/dev/null; then
-  echo 'cloud-user ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/cloud-user
-  chmod 440 /etc/sudoers.d/cloud-user
-fi
+rm -f /etc/sudoers.d/almalinux /etc/sudoers.d/cloud-user
 
 dnf clean all || true

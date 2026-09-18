@@ -5,6 +5,19 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta28] - 2026-09-18
+
+### Security
+
+- **Harden Packer golden defaults.** Ubuntu autoinstall no longer bakes a
+  well-known `ubuntu:ubuntu` password, NOPASSWD sudo, or an unlocked root
+  account. The `ubuntu` user is created with operator `ssh_password` /
+  `ssh_password_crypted` from gitignored pkrvars only; root is locked
+  (`disable_root: true`). AlmaLinux kickstart enables the firewall with SSH,
+  sets SELinux enforcing, locks root, and grants password-required wheel
+  sudo instead of NOPASSWD. `packer/scripts/install-ubuntu.sh` and
+  `install-alma.sh` no longer write NOPASSWD drop-ins.
+
 ## [0.97-beta27] - 2026-09-18
 
 ### Added

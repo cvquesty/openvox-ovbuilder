@@ -128,7 +128,9 @@ Produces template `ovbuilder-ubuntu-24.04`.
 - Minimal OS (`@core` / equivalent) plus a small tools set
 - `open-vm-tools`
 - **cloud-init** with VMware guestinfo datasource enabled
-- Default admin user; password from gitignored Packer vars
+- Default admin user (`ubuntu` / `almalinux`); password from gitignored Packer vars only (no baked-in default)
+- Root locked on the golden; sudo requires that operator password (no NOPASSWD)
+- AlmaLinux: firewall enabled with SSH; SELinux enforcing
 - Cleanup: machine-id, SSH host keys regenerate on first boot, cloud-init clean
 - **No** static IP, **no** Puppet/OpenVox signed cert
 - **No** full Anaconda “Server” group set — that is applied at **clone time**

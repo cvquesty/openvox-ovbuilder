@@ -97,7 +97,10 @@ IP so the CA, compilers, and GUI never go through Squid.
 ## Packer golden builds
 
 Packer needs vCenter credentials and the same guest password you will use
-for clones.
+for clones. Templates do **not** bake a well-known default password; they
+substitute `ssh_password` / `ssh_password_crypted` from this local file.
+Root is locked on the golden. The admin user (`ubuntu` / `almalinux`) uses
+password-required sudo.
 
 ```bash
 cd packer
