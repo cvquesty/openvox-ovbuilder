@@ -4,7 +4,7 @@
 
 **Build OpenVox-ready VMware VMs from Packer golden templates (or a legacy ISO) — without memorizing Terraform every time.**
 
-[![Version](https://img.shields.io/badge/version-0.97--beta31-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.97--beta33-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Terraform](https://img.shields.io/badge/Terraform-1.5%2B-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)](https://terraform.io)
@@ -156,7 +156,7 @@ ovbuilder build
 You will be asked for:
 
 - vCenter hostname and login
-- Datacenter, compute cluster, datastore cluster (or single datastore), network(s)
+- Datacenter, compute cluster (or standalone ESXi host if the DC has no cluster), datastore cluster (or single datastore), network(s)
 - OS (live `ovbuilder-*` golden template — name + short label only), or ISO if you chose legacy mode
 - Hostname, IP, subnet prefix, optional gateway/DNS
 - CPU, memory (GB), disk (GB, always thin-provisioned)
@@ -407,13 +407,30 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta31` |
+| ovbuilder CLI | `0.97-beta33` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
 | OpenVox agent | 8.x+ via official `install.bash` on port 8140 |
 
 ## Troubleshooting
+
+### SEA3 / standalone ESXi: `cluster 'esx1…' not found`
+
+Current staging places standalone hosts with `compute_type=host` /
+`data.vsphere_host`. That is **not** in older `/opt/ovbuilder` installs that
+still have a root `data.vsphere_compute_cluster` in `providers.tf` and a
+picker titled “Clusters in SEA3…”.
+
+```bash
+ovbuilder --version    # need 0.97-beta31+ (this tree: 0.97-beta33)
+sudo -H ./install.sh   # or ./install.sh --user
+hash -r && ovbuilder --version
+```
+
+Then re-run `ovbuilder build`. Hosts are labeled **standalone ESXi host**;
+clusters are **cluster (DRS/HA)**. A missing Packer golden now fails before
+Terraform instead of `vm 'ovbuilder-ubuntu-24.04' not found`.
 
 ### `ovbuilder` not found after install (macOS / Linux)
 

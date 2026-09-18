@@ -99,6 +99,26 @@ def test_clusters_live_success():
     assert res.status_code == 200
     assert res.json() == ["Production Cluster", "Lab Cluster"]
     fake_vsphere.list_clusters.assert_called_once()
+    fake_vsphere.list_standalone_hosts.assert_not_called()
+
+
+def test_hosts_live_success():
+    fake_vsphere = MagicMock()
+    fake_vsphere.list_standalone_hosts.return_value = [
+        "esx1.sea3.office.example.net",
+        "esx2.sea3.office.example.net",
+    ]
+    with patch.object(inventory_api, "vsphere_session", _session), patch.object(
+        inventory_api, "vsphere", fake_vsphere
+    ):
+        res = _client().get("/api/inventory/hosts")
+    assert res.status_code == 200
+    assert res.json() == [
+        "esx1.sea3.office.example.net",
+        "esx2.sea3.office.example.net",
+    ]
+    fake_vsphere.list_standalone_hosts.assert_called_once()
+    fake_vsphere.list_clusters.assert_not_called()
 
 
 def test_networks_live_success():

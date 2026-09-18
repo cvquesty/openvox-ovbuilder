@@ -181,46 +181,231 @@ def list_datacenters(si) -> List[str]:
     return sorted(names)
 
 
+def _wsdl_name(item) -> str:
+    """pyVmomi WSDL type, or the Python class name for test doubles."""
+    wsdl = getattr(item, "_wsdlName", None)
+    if wsdl:
+        return str(wsdl)
+    cls = type(item)
+    return str(getattr(cls, "_wsdlName", None) or cls.__name__)
+
+
+def _is_cluster_compute(item) -> bool:
+    """True only for DRS/HA ClusterComputeResource (not standalone hosts)."""
+    if isinstance(item, vim.ClusterComputeResource):
+        return True
+    return _wsdl_name(item) == "ClusterComputeResource"
+
+
+def _is_compute_resource(item) -> bool:
+    """True for ClusterComputeResource or a bare standalone ComputeResource."""
+    if isinstance(item, vim.ComputeResource):
+        return True
+    return _wsdl_name(item) in {"ComputeResource", "ClusterComputeResource"}
+
+
+def _is_folder(item) -> bool:
+    if isinstance(item, vim.Folder):
+        return True
+    return _wsdl_name(item) == "Folder"
+
+
+def _is_host_system(item) -> bool:
+    if isinstance(item, vim.HostSystem):
+        return True
+    return _wsdl_name(item) == "HostSystem"
+
+
+def _walk_folder(folder, *, depth: int = 0, max_depth: int = 16):
+    """Yield hostFolder children, including nested folders."""
+    if folder is None or depth > max_depth:
+        return
+    children = getattr(folder, "childEntity", None) or []
+    for item in children:
+        yield item
+        if _is_folder(item):
+            yield from _walk_folder(item, depth=depth + 1, max_depth=max_depth)
+
+
+def _host_names_from_compute(item) -> List[str]:
+    """HostSystem names under a standalone ComputeResource (else the CR name)."""
+    names: List[str] = []
+    hosts = getattr(item, "host", None) or []
+    for host in hosts:
+        name = getattr(host, "name", None)
+        if name:
+            names.append(str(name))
+    if names:
+        return names
+    name = getattr(item, "name", None)
+    return [str(name)] if name else []
+
+
 def list_clusters(si, datacenter_name: str) -> List[str]:
     """
-    Return sorted cluster / standalone host-folder compute resource names.
+    Return sorted ClusterComputeResource names in the datacenter.
 
-    Both ClusterComputeResource and bare ComputeResource are included so
-    small labs without a formal cluster still appear in the picker.
+    Standalone ESXi hosts (bare ComputeResource / HostSystem) are never
+    included. Terraform ``data.vsphere_compute_cluster`` only accepts a
+    real cluster; hosts are listed by ``list_standalone_hosts``.
     """
     dc = _find_datacenter(si, datacenter_name)
     if not dc:
         return []
 
-    names = []
-    for item in dc.hostFolder.childEntity:
-        if isinstance(item, (vim.ClusterComputeResource, vim.ComputeResource)):
-            names.append(item.name)
-        # Nested folders under hostFolder are uncommon; skip for simplicity.
+    names = [
+        str(item.name)
+        for item in _walk_folder(getattr(dc, "hostFolder", None))
+        if _is_cluster_compute(item) and getattr(item, "name", None)
+    ]
     return sorted(names)
+
+
+def list_standalone_hosts(si, datacenter_name: str) -> List[str]:
+    """
+    Return ESXi host names that are not members of a ClusterComputeResource.
+
+    Used when a datacenter (e.g. SEA3) has no DRS cluster. Terraform then
+    places via ``data.vsphere_host`` (compute_type=host).
+    """
+    dc = _find_datacenter(si, datacenter_name)
+    if not dc:
+        return []
+
+    names: List[str] = []
+    for item in _walk_folder(getattr(dc, "hostFolder", None)):
+        if _is_cluster_compute(item):
+            continue
+        if _is_compute_resource(item):
+            names.extend(_host_names_from_compute(item))
+        elif _is_host_system(item) and getattr(item, "name", None):
+            names.append(str(item.name))
+    return sorted(set(names))
+
+
+def looks_like_host_fqdn(name: str) -> bool:
+    """True for ESXi-style FQDNs (esx1.sea3.office.example.net), not 'Prod Cluster'."""
+    text = (name or "").strip()
+    if not text or " " in text:
+        return False
+    labels = text.split(".")
+    return len(labels) >= 2 and all(labels)
 
 
 def classify_compute(si, datacenter_name: str, name: str) -> str:
     """
-    Return ``cluster`` or ``host`` for a name from ``list_clusters``.
+    Return ``cluster`` or ``host`` for a live inventory name.
 
-    ClusterComputeResource is a ComputeResource subclass, so the cluster
-    check must run first. Unknown names default to ``cluster`` so ATLC/PDXC
-    keep using ``vsphere_compute_cluster``.
+    Unknown names raise RuntimeError. Defaulting to ``cluster`` sent
+    standalone host FQDNs through ``vsphere_compute_cluster`` and Terraform
+    failed with ``cluster 'esx1…' not found``.
     """
     if not name:
-        return "cluster"
+        raise RuntimeError("Compute cluster or standalone ESXi host name is required.")
+    try:
+        clusters = list_clusters(si, datacenter_name)
+        if name in clusters:
+            return "cluster"
+        hosts = list_standalone_hosts(si, datacenter_name)
+        if name in hosts:
+            return "host"
+    except Exception as exc:
+        if looks_like_host_fqdn(name):
+            raise RuntimeError(
+                f"Could not classify {name!r} as cluster or host ({exc}). "
+                "The name looks like an ESXi host FQDN; refusing to treat it "
+                "as a DRS cluster (that would fail vsphere_compute_cluster)."
+            ) from exc
+        raise
+    if looks_like_host_fqdn(name):
+        extra = (
+            " The name looks like an ESXi host FQDN; refusing to treat it "
+            "as a DRS cluster."
+        )
+    elif clusters:
+        extra = f" Known clusters: {', '.join(clusters)}."
+    elif hosts:
+        extra = (
+            " This datacenter has no ClusterComputeResource; "
+            f"standalone hosts: {', '.join(hosts)}."
+        )
+    else:
+        extra = (
+            " This datacenter has no ClusterComputeResource and no "
+            "standalone ESXi hosts visible to this session."
+        )
+    raise RuntimeError(
+        f"{name!r} is not a vSphere compute cluster or standalone ESXi host "
+        f"in datacenter {datacenter_name!r}.{extra}"
+    )
+
+
+def template_exists_in_datacenter(si, vm_name: str, datacenter_name: str) -> bool:
+    """True when *vm_name* is a VM template (config.template) in that DC."""
+    if not vm_name or not datacenter_name:
+        return False
     dc = _find_datacenter(si, datacenter_name)
     if not dc:
-        return "cluster"
-    for item in dc.hostFolder.childEntity:
-        if getattr(item, "name", None) != name:
-            continue
-        if isinstance(item, vim.ClusterComputeResource):
-            return "cluster"
-        if isinstance(item, vim.ComputeResource):
-            return "host"
-    return "cluster"
+        return False
+    content = _content(si)
+    view = content.viewManager.CreateContainerView(
+        dc, [vim.VirtualMachine], True
+    )
+    try:
+        for vm in view.view:
+            try:
+                if getattr(vm, "name", None) != vm_name:
+                    continue
+                cfg = getattr(vm, "config", None)
+                if cfg is not None and getattr(cfg, "template", False):
+                    return True
+            except Exception:
+                continue
+        return False
+    finally:
+        view.Destroy()
+
+
+def find_template_datacenters(si, vm_name: str) -> List[str]:
+    """Datacenter names that hold an ``ovbuilder-*`` template with this name."""
+    if not vm_name:
+        return []
+    found = [
+        str(row["datacenter"])
+        for row in list_golden_templates(si)
+        if row.get("name") == vm_name and row.get("datacenter")
+    ]
+    return sorted(set(found))
+
+
+def require_template(si, vm_name: str, preferred_datacenter: str = "") -> str:
+    """
+    Abort unless *vm_name* is a VM template in some datacenter.
+
+    Returns the datacenter Terraform should query (preferred when it
+    actually has the template, otherwise the first DC that does). Cross-DC
+    clones stay valid; a golden missing everywhere fails before apply.
+    """
+    if not vm_name:
+        raise RuntimeError(
+            "No Packer template selected. Choose an ovbuilder-* golden "
+            "before Terraform runs."
+        )
+    preferred = (preferred_datacenter or "").strip()
+    if preferred and template_exists_in_datacenter(si, vm_name, preferred):
+        return preferred
+    found = find_template_datacenters(si, vm_name)
+    if preferred and preferred in found:
+        return preferred
+    if found:
+        return found[0]
+    raise RuntimeError(
+        f"Packer template {vm_name!r} was not found in any vSphere "
+        "datacenter. Terraform would fail with "
+        f"vm '{vm_name}' not found. Confirm the Packer golden exists as a "
+        f"vSphere template named {vm_name} (Mark as Template), then re-run "
+        "`ovbuilder build`."
+    )
 
 
 def _datacenter_name_for(entity) -> str:

@@ -37,7 +37,8 @@ export function BuildFormPage() {
   const navigate = useNavigate();
   const [osImages, setOsImages] = useState<OsImage[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [clusters, setClusters] = useState<string[]>([]);
+  const [clusterNames, setClusterNames] = useState<string[]>([]);
+  const [hostNames, setHostNames] = useState<string[]>([]);
   const [networks, setNetworks] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -93,10 +94,11 @@ export function BuildFormPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [osRes, envRes, clRes, netRes] = await Promise.allSettled([
+      const [osRes, envRes, clRes, hostRes, netRes] = await Promise.allSettled([
         inventory.osImages(),
         inventory.environments(),
         inventory.clusters(),
+        inventory.hosts(),
         inventory.networks(),
       ]);
       if (cancelled) return;
@@ -122,14 +124,23 @@ export function BuildFormPage() {
         setError(envRes.reason instanceof Error ? envRes.reason.message : 'Failed to load environments');
       }
 
-      if (clRes.status === 'fulfilled') {
-        const names = clRes.value;
-        setClusters(names);
+      if (clRes.status === 'fulfilled' || hostRes.status === 'fulfilled') {
+        const liveClusters = clRes.status === 'fulfilled' ? clRes.value : [];
+        const liveHosts = hostRes.status === 'fulfilled' ? hostRes.value : [];
+        setClusterNames(liveClusters);
+        setHostNames(liveHosts);
+        const names = [...liveClusters, ...liveHosts];
         if (names.length && !form.values.cluster) {
           const envDefault = (envRes.status === 'fulfilled'
             ? envRes.value.find((e) => e.key === form.values.environment)?.cluster
             : '') || '';
           form.setFieldValue('cluster', names.includes(envDefault) ? envDefault : names[0]);
+        }
+        if (clRes.status === 'rejected') {
+          liveErrors.push(clRes.reason instanceof Error ? clRes.reason.message : 'clusters unavailable');
+        }
+        if (hostRes.status === 'rejected') {
+          liveErrors.push(hostRes.reason instanceof Error ? hostRes.reason.message : 'hosts unavailable');
         }
       } else {
         liveErrors.push(clRes.reason instanceof Error ? clRes.reason.message : 'clusters unavailable');
@@ -174,15 +185,23 @@ export function BuildFormPage() {
     () => environments.find((e) => e.key === form.values.environment),
     [environments, form.values.environment],
   );
+  const computeOptions = useMemo(
+    () => [
+      ...clusterNames.map((name) => ({ value: name, label: `${name} (cluster)` })),
+      ...hostNames.map((name) => ({ value: name, label: `${name} (standalone ESXi host)` })),
+    ],
+    [clusterNames, hostNames],
+  );
   const showSkipDnf = isAlmaOs(form.values.os_image, selectedOs?.label);
 
   useEffect(() => {
     const preferred = selectedEnv?.cluster;
-    if (preferred && clusters.includes(preferred) && form.values.cluster !== preferred) {
+    const names = computeOptions.map((row) => row.value);
+    if (preferred && names.includes(preferred) && form.values.cluster !== preferred) {
       form.setFieldValue('cluster', preferred);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedEnv?.cluster, clusters]);
+  }, [selectedEnv?.cluster, computeOptions]);
 
   useEffect(() => {
     if (!showSkipDnf && form.values.skip_dnf_groups) {
@@ -196,8 +215,8 @@ export function BuildFormPage() {
       setError(null);
       setSubmitting(true);
       try {
-        if (clusters.length && !values.cluster) {
-          form.setFieldError('cluster', 'Cluster is required');
+        if (computeOptions.length && !values.cluster) {
+          form.setFieldError('cluster', 'Cluster or standalone host is required');
           focusFirstInvalid();
           return;
         }
@@ -296,11 +315,11 @@ export function BuildFormPage() {
             <Group grow>
               <Select
                 label="Compute cluster or host"
-                placeholder={clusters.length ? 'Select cluster or host' : 'Unavailable (vSphere unreachable)'}
-                data={clusters.map((name) => ({ value: name, label: name }))}
+                placeholder={computeOptions.length ? 'Select cluster or standalone host' : 'Unavailable (vSphere unreachable)'}
+                data={computeOptions}
                 searchable
-                required={clusters.length > 0}
-                disabled={!clusters.length}
+                required={computeOptions.length > 0}
+                disabled={!computeOptions.length}
                 {...form.getInputProps('cluster')}
               />
               <Select
