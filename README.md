@@ -4,7 +4,7 @@
 
 **Build OpenVox-ready VMware VMs from Packer golden templates (or a legacy ISO) — without memorizing Terraform every time.**
 
-[![Version](https://img.shields.io/badge/version-0.97--beta23-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.97--beta24-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Terraform](https://img.shields.io/badge/Terraform-1.5%2B-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)](https://terraform.io)
@@ -390,7 +390,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta23` |
+| ovbuilder CLI | `0.97-beta24` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
