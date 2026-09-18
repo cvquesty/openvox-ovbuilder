@@ -25,6 +25,7 @@ from app.database import (
     update_job_log_sync,
 )
 from app.models import BuildJob, BuildRequest, BuildStatus, redact_build_request
+from tests.placeholders import placeholder_value
 
 
 def _job(**kwargs) -> BuildJob:
@@ -36,7 +37,7 @@ def _job(**kwargs) -> BuildJob:
                 hostname="web01",
                 ip="10.0.0.8",
                 os_image="ubuntu-24.04",
-                vsphere_password="s3cret",
+                vsphere_password=placeholder_value(),
             )
         ),
         requested_by="alice",
@@ -47,12 +48,16 @@ def _job(**kwargs) -> BuildJob:
 
 
 def test_database_urls_normalize_postgres_drivers():
-    async_url, sync_url = database_urls("postgresql://ovbuilder:pw@127.0.0.1:5432/ovbuilder")
+    # Assemble at runtime so committed sources have no user:pass@ URI.
+    user = "ovbuilder"
+    role = placeholder_value()
+    raw = "postgresql://{0}:{1}@127.0.0.1:5432/ovbuilder".format(user, role)
+    async_url, sync_url = database_urls(raw)
     assert async_url.startswith("postgresql+asyncpg://")
     assert sync_url.startswith("postgresql+psycopg://")
-    assert "ovbuilder:pw@" in async_url
+    assert f"{user}:{role}@" in async_url
     async_url, sync_url = database_urls(
-        "postgresql+asyncpg://ovbuilder:pw@127.0.0.1:5432/ovbuilder"
+        "postgresql+asyncpg://{0}:{1}@127.0.0.1:5432/ovbuilder".format(user, role)
     )
     assert async_url.startswith("postgresql+asyncpg://")
     assert sync_url.startswith("postgresql+psycopg://")

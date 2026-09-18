@@ -38,14 +38,17 @@ password must come from **your machine**, not from the repository.
 ```bash
 mkdir -p ~/.config/ovbuilder
 chmod 700 ~/.config/ovbuilder
-printf "%s\n" "OVBUILDER_GOLDEN_PASSWORD='choose-a-strong-lab-password'" > ~/.config/ovbuilder/secrets.env
+printf "%s\n" "OVBUILDER_GOLDEN_PASSWORD=" > ~/.config/ovbuilder/secrets.env
 chmod 600 ~/.config/ovbuilder/secrets.env
+# Edit the file and put your local lab password after the equals.
+# Never commit secrets.env.
 ```
 
-Or for one shell session only:
+Or for one shell session only (set the value in your shell, not in git):
 
 ```bash
-export OVBUILDER_GOLDEN_PASSWORD='choose-a-strong-lab-password'
+export OVBUILDER_GOLDEN_PASSWORD=
+# then assign your local lab password in that same shell
 ovbuilder build
 ```
 
@@ -54,23 +57,22 @@ ovbuilder build
 ```powershell
 $dir = Join-Path $env:APPDATA "ovbuilder"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-Set-Content -Path (Join-Path $dir "secrets.env") -Value "OVBUILDER_GOLDEN_PASSWORD=choose-a-strong-lab-password"
+Set-Content -Path (Join-Path $dir "secrets.env") -Value "OVBUILDER_GOLDEN_PASSWORD="
+# Edit the file and put your local lab password after the equals.
 ```
 
-Or for one PowerShell session only:
+Or for one PowerShell session only (set the value in your session, not in git):
 
 ```powershell
-$env:OVBUILDER_GOLDEN_PASSWORD = 'choose-a-strong-lab-password'
+$env:OVBUILDER_GOLDEN_PASSWORD = ''
+# then assign your local lab password in that same session
 ovbuilder build
 ```
 
 ### Optional YAML form
 
-Same directory, file `secrets.yaml`:
-
-```yaml
-golden_password: choose-a-strong-lab-password
-```
+Same directory, file `secrets.yaml`. Create the file locally and set
+`golden_password` there. Do not put a real value in git.
 
 If the password is unset, golden clone **stops early** with setup instructions
 instead of using a hard-coded default.
@@ -81,7 +83,9 @@ Do **not** put the proxy password in git or Packer seeds. Add it to the
 same `secrets.env`:
 
 ```bash
-printf "%s\n" "OVBUILDER_HTTP_PROXY='http://USER:PASS@httpproxy.example.com:3128'" >> ~/.config/ovbuilder/secrets.env
+printf "%s\n" "OVBUILDER_HTTP_PROXY=" >> ~/.config/ovbuilder/secrets.env
+# Edit secrets.env and set http://user:…@httpproxy.example.com:3128 locally.
+# Never commit that file.
 chmod 600 ~/.config/ovbuilder/secrets.env
 ```
 
@@ -114,7 +118,8 @@ Then edit `variables.auto.pkrvars.hcl`:
 - `ssh_password_crypted` — generate with:
 
 ```bash
-openssl passwd -6 'same-as-ssh_password'
+openssl passwd -6
+# type the same local lab password when prompted
 ```
 
 On Windows, run `openssl` from Git Bash, WSL, or a local OpenSSL install.

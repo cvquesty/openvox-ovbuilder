@@ -3,7 +3,8 @@
 
 vcenter_server   = "vcenter.example.com"
 vcenter_username = "administrator@vsphere.local"
-vcenter_password = "replace-me-not-in-git"
+# Set in the gitignored copy only. Empty here so detectors see no secret.
+vcenter_password = ""
 
 datacenter = "Main DC"
 cluster    = "Production Cluster"
@@ -16,11 +17,12 @@ insecure_connection = true
 
 # Golden guest login (same value you put in ~/.config/ovbuilder/secrets.env
 # as OVBUILDER_GOLDEN_PASSWORD for clones).
-ssh_password = "replace-me-not-in-git"
+# Set in the gitignored copy only. Empty here so detectors see no secret.
+ssh_password = ""
 
 # Ubuntu autoinstall identity requires a crypt hash of the same password:
-#   openssl passwd -6 'replace-me-not-in-git'
-ssh_password_crypted = "$6$rounds=5000$saltsalt$replace-with-openssl-passwd-6-output"
+#   openssl passwd -6   # run locally; paste the hash into the gitignored copy
+ssh_password_crypted = ""
 
 # Optional:
 # ssh_public_key = "ssh-ed25519 AAAA... you@example.com"

@@ -141,18 +141,20 @@ def golden_password_setup_help() -> str:
     unix = (
         f"  mkdir -p {directory}\n"
         f"  chmod 700 {directory}\n"
-        f"  printf \"%s\\n\" \"{ENV_GOLDEN_PASSWORD}='your-lab-password'\" > {env_path}\n"
+        f"  printf \"%s\\n\" \"{ENV_GOLDEN_PASSWORD}=\" > {env_path}\n"
         f"  chmod 600 {env_path}\n"
+        "  # then edit the file and put your local lab password after the equals\n"
         "\n"
-        "  # or this shell only:\n"
-        f"  export {ENV_GOLDEN_PASSWORD}='your-lab-password'\n"
+        "  # or this shell only (set the value yourself; do not commit it):\n"
+        f"  export {ENV_GOLDEN_PASSWORD}=\n"
     )
     windows = (
         f"  New-Item -ItemType Directory -Force -Path \"{directory}\"\n"
-        f"  Set-Content -Path \"{env_path}\" -Value \"{ENV_GOLDEN_PASSWORD}=your-lab-password\"\n"
+        f"  Set-Content -Path \"{env_path}\" -Value \"{ENV_GOLDEN_PASSWORD}=\"\n"
+        "  # then edit the file and put your local lab password after the equals\n"
         "\n"
-        "  # or this session only:\n"
-        f"  $env:{ENV_GOLDEN_PASSWORD} = 'your-lab-password'\n"
+        "  # or this session only (set the value yourself; do not commit it):\n"
+        f"  $env:{ENV_GOLDEN_PASSWORD} = ''\n"
     )
     primary = windows if is_windows() else unix
     secondary_label = "UNIX / macOS / Linux / Git Bash / WSL" if is_windows() else "Windows PowerShell"

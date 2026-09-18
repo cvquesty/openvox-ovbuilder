@@ -180,7 +180,7 @@ EOF
     [[ "$(env_get "$tmp" SECRET_KEY)" == "generated-secret-value-that-is-long-enough-32+" ]] \
         || die "self-test: env_set/get SECRET_KEY mismatch"
 
-    env_set "$tmp" DATABASE_URL "postgresql+asyncpg://ovbuilder:ovbuilder@127.0.0.1:5432/ovbuilder"
+    env_set "$tmp" DATABASE_URL "postgresql+asyncpg://ovbuilder@127.0.0.1:5432/ovbuilder"
     [[ "$(env_get "$tmp" DATABASE_URL)" == postgresql+asyncpg://* ]] \
         || die "self-test: DATABASE_URL not written"
 
@@ -345,7 +345,7 @@ if [[ -n "${OVBUILDER_DATABASE_URL:-}" ]]; then
     env_set "${ENV_FILE}" DATABASE_URL "${db_url}"
 fi
 if [[ -z "${db_url}" ]]; then
-    die "DATABASE_URL is empty. Set it in ${ENV_FILE} or OVBUILDER_DATABASE_URL (example: postgresql+asyncpg://ovbuilder:ovbuilder@127.0.0.1:5432/ovbuilder)."
+    die "DATABASE_URL is empty. Set it in ${ENV_FILE} or OVBUILDER_DATABASE_URL (example: postgresql+asyncpg://ovbuilder@127.0.0.1:5432/ovbuilder)."
 fi
 log_ok "DATABASE_URL is set"
 

@@ -110,7 +110,8 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
 
     # --- Postgres (local system service) ------------------------------------
-    database_url: str = "postgresql+asyncpg://ovbuilder:ovbuilder@127.0.0.1:5432/ovbuilder"
+    # No role password in the committed default. Set one in gitignored .env.
+    database_url: str = "postgresql+asyncpg://ovbuilder@127.0.0.1:5432/ovbuilder"
 
     # --- ovbuilder CLI integration -----------------------------------------
     ovbuilder_binary: str = "ovbuilder"
