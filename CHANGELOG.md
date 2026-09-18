@@ -5,6 +5,24 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta33] - 2026-09-18
+
+### Fixed
+
+- **Fail before Terraform if the Packer golden is in no datacenter.** After OS
+  selection, ovbuilder searches live inventory for the `ovbuilder-*` template.
+  Missing everywhere is an ovbuilder error (`vm '…' not found` would have
+  come from Terraform). If the golden lives in another DC, that source DC is
+  returned as `template_datacenter` (SEA3 can still clone PDXC goldens).
+- **Interactive compute always runs `classify_compute`.** The picker lists DRS
+  clusters and standalone ESXi hosts with a Type column; the classified
+  `compute_type` is what Terraform gets (`vsphere_host` vs
+  `vsphere_compute_cluster`). Host FQDNs never default silently to `cluster`
+  when classification fails open.
+- **Docs:** SEA3 standalone-host placement is on current staging. An old
+  `/opt/ovbuilder` (root `data.vsphere_compute_cluster`, UI title
+  “Clusters in SEA3…”) must be reinstalled from tip.
+
 ## [0.97-beta32] - 2026-09-18
 
 ### Fixed

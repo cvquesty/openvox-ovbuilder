@@ -11,8 +11,14 @@ The Build form OS picker lists live `ovbuilder-*` templates from every
 datacenter (name + short label only). The backend resolves the template's
 source datacenter silently so SEA3 can clone goldens that live in PDXC.
 `/api/inventory/clusters` lists only real `ClusterComputeResource` objects.
-Standalone ESXi hosts are `/api/inventory/hosts` and are offered only when
-the placement datacenter has no compute cluster.
+Standalone ESXi hosts are `/api/inventory/hosts`, labeled separately in the
+compute picker.
+
+SEA3 standalone-host placement requires a current staging install on the
+web box (and on any laptop CLI). If `/opt/ovbuilder` still has a root
+`data.vsphere_compute_cluster` in `providers.tf`, reinstall from tip
+(`sudo ./install.sh` then `sudo ./web/install-web.sh`) before filing a
+placement bug.
 
 ## Roles
 

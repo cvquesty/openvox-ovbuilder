@@ -221,36 +221,58 @@ def _prompt_table_choice(
         return names[default_index]
 
 
+def _compute_picker_rows(
+    clusters: List[str], hosts: List[str]
+) -> List[Tuple[str, str]]:
+    """(name, kind) rows: DRS clusters first, then standalone ESXi hosts."""
+    rows: List[Tuple[str, str]] = [
+        (name, COMPUTE_TYPE_CLUSTER) for name in clusters
+    ]
+    rows.extend((name, COMPUTE_TYPE_HOST) for name in hosts)
+    return rows
+
+
 def _prompt_compute_placement(si, dc: str) -> Tuple[str, str]:
     """
-    Pick a real ClusterComputeResource, or a standalone host if none exist.
+    Pick compute and always classify via ``classify_compute``.
 
-    Hosts are never listed as clusters. Terraform ``vsphere_compute_cluster``
-    rejects ESXi host FQDNs.
+    The table labels each row as a DRS cluster or standalone ESXi host so
+    SEA3 FQDNs are not mistaken for ClusterComputeResource names.
     """
     clusters = vsphere.list_clusters(si, dc)
-    if clusters:
-        return (
-            _prompt_table_choice(f"Clusters in {dc}", clusters),
-            COMPUTE_TYPE_CLUSTER,
-        )
     hosts = vsphere.list_standalone_hosts(si, dc)
-    if hosts:
+    rows = _compute_picker_rows(clusters, hosts)
+    if not rows:
         console.print(
-            f"[yellow]Datacenter {dc!r} has no vSphere compute cluster "
-            f"(ClusterComputeResource). Placing on a standalone ESXi host.[/yellow]"
+            f"[red]No vSphere compute cluster (ClusterComputeResource) and no "
+            f"standalone ESXi host found in datacenter {dc!r}.[/red]\n"
+            "[dim]ovbuilder requires a DRS/HA cluster, or a standalone host "
+            "when the datacenter has no cluster.[/dim]"
         )
-        return (
-            _prompt_table_choice(f"Standalone ESXi hosts in {dc}", hosts),
-            COMPUTE_TYPE_HOST,
+        raise typer.Exit(1)
+    table = Table(title=f"Compute in {dc}")
+    table.add_column("#")
+    table.add_column("Name")
+    table.add_column("Type")
+    for i, (name, kind) in enumerate(rows, 1):
+        label = (
+            "cluster (DRS/HA)"
+            if kind == COMPUTE_TYPE_CLUSTER
+            else "standalone ESXi host"
         )
-    console.print(
-        f"[red]No vSphere compute cluster (ClusterComputeResource) and no "
-        f"standalone ESXi host found in datacenter {dc!r}.[/red]\n"
-        "[dim]ovbuilder requires a DRS/HA cluster, or a standalone host "
-        "when the datacenter has no cluster.[/dim]"
-    )
-    raise typer.Exit(1)
+        table.add_row(str(i), name, label)
+    console.print(table)
+    choice = Prompt.ask("Select", default="1")
+    try:
+        selected = rows[int(choice) - 1][0]
+    except Exception:
+        selected = rows[0][0]
+    try:
+        compute_type = vsphere.classify_compute(si, dc, selected)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    return selected, compute_type
 
 
 def _verify_clone_template(
@@ -259,11 +281,11 @@ def _verify_clone_template(
     template_name: str,
     template_datacenter: str,
     placement_datacenter: str,
-) -> None:
-    """Fail before Terraform if the Packer template is missing in the lookup DC."""
-    lookup_dc = (template_datacenter or placement_datacenter or "").strip()
+) -> str:
+    """Fail before Terraform if the Packer template is missing in every DC."""
+    preferred = (template_datacenter or placement_datacenter or "").strip()
     try:
-        vsphere.require_template(si, template_name, lookup_dc)
+        return vsphere.require_template(si, template_name, preferred)
     except RuntimeError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -341,7 +363,7 @@ def _resolve_golden_and_compute(
                 console.print(f"[red]{exc}[/red]")
                 raise typer.Exit(1) from exc
         if template_name:
-            _verify_clone_template(
+            template_datacenter = _verify_clone_template(
                 si,
                 template_name=template_name,
                 template_datacenter=template_datacenter,
@@ -357,6 +379,15 @@ def _resolve_golden_and_compute(
     except typer.Exit:
         raise
     except Exception as exc:
+        if vsphere.looks_like_host_fqdn(cluster_name or ""):
+            console.print(
+                f"[red]Could not classify compute {cluster_name!r} ({exc}). "
+                "That name looks like an ESXi host FQDN; refusing to treat it "
+                "as a DRS cluster (vsphere_compute_cluster would fail). "
+                "Reinstall ovbuilder from current staging if /opt/ovbuilder "
+                "is older than standalone-host placement.[/red]"
+            )
+            raise typer.Exit(1) from exc
         console.print(
             f"[yellow]Could not resolve golden/host placement from vCenter: "
             f"{exc}[/yellow]"
@@ -679,7 +710,7 @@ def build(
             default_user = chosen.default_user
             template_datacenter = chosen.datacenter
             os_image = chosen.key
-            _verify_clone_template(
+            template_datacenter = _verify_clone_template(
                 si,
                 template_name=template_name,
                 template_datacenter=template_datacenter,

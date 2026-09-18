@@ -283,6 +283,15 @@ def list_standalone_hosts(si, datacenter_name: str) -> List[str]:
     return sorted(set(names))
 
 
+def looks_like_host_fqdn(name: str) -> bool:
+    """True for ESXi-style FQDNs (esx1.sea3.office.example.net), not 'Prod Cluster'."""
+    text = (name or "").strip()
+    if not text or " " in text:
+        return False
+    labels = text.split(".")
+    return len(labels) >= 2 and all(labels)
+
+
 def classify_compute(si, datacenter_name: str, name: str) -> str:
     """
     Return ``cluster`` or ``host`` for a live inventory name.
@@ -293,13 +302,27 @@ def classify_compute(si, datacenter_name: str, name: str) -> str:
     """
     if not name:
         raise RuntimeError("Compute cluster or standalone ESXi host name is required.")
-    clusters = list_clusters(si, datacenter_name)
-    if name in clusters:
-        return "cluster"
-    hosts = list_standalone_hosts(si, datacenter_name)
-    if name in hosts:
-        return "host"
-    if clusters:
+    try:
+        clusters = list_clusters(si, datacenter_name)
+        if name in clusters:
+            return "cluster"
+        hosts = list_standalone_hosts(si, datacenter_name)
+        if name in hosts:
+            return "host"
+    except Exception as exc:
+        if looks_like_host_fqdn(name):
+            raise RuntimeError(
+                f"Could not classify {name!r} as cluster or host ({exc}). "
+                "The name looks like an ESXi host FQDN; refusing to treat it "
+                "as a DRS cluster (that would fail vsphere_compute_cluster)."
+            ) from exc
+        raise
+    if looks_like_host_fqdn(name):
+        extra = (
+            " The name looks like an ESXi host FQDN; refusing to treat it "
+            "as a DRS cluster."
+        )
+    elif clusters:
         extra = f" Known clusters: {', '.join(clusters)}."
     elif hosts:
         extra = (
@@ -355,43 +378,32 @@ def find_template_datacenters(si, vm_name: str) -> List[str]:
     return sorted(set(found))
 
 
-def require_template(si, vm_name: str, datacenter_name: str) -> None:
+def require_template(si, vm_name: str, preferred_datacenter: str = "") -> str:
     """
-    Abort unless *vm_name* is a VM template in *datacenter_name*.
+    Abort unless *vm_name* is a VM template in some datacenter.
 
-    Called before Terraform so a missing golden is an ovbuilder error, not
-    ``vm 'ovbuilder-…' not found`` from ``data.vsphere_virtual_machine``.
+    Returns the datacenter Terraform should query (preferred when it
+    actually has the template, otherwise the first DC that does). Cross-DC
+    clones stay valid; a golden missing everywhere fails before apply.
     """
     if not vm_name:
         raise RuntimeError(
             "No Packer template selected. Choose an ovbuilder-* golden "
             "before Terraform runs."
         )
-    if not datacenter_name:
-        raise RuntimeError(
-            "No datacenter selected; cannot verify the Packer template "
-            "before Terraform."
-        )
-    if template_exists_in_datacenter(si, vm_name, datacenter_name):
-        return
-    elsewhere = [
-        dc
-        for dc in find_template_datacenters(si, vm_name)
-        if dc != datacenter_name
-    ]
-    if elsewhere:
-        raise RuntimeError(
-            f"Packer template {vm_name!r} was not found in datacenter "
-            f"{datacenter_name!r}. Terraform looks up the template in that "
-            f"datacenter and would fail. It exists in: {', '.join(elsewhere)}. "
-            "Copy the golden into the selected datacenter, or ensure "
-            "template_datacenter matches the source DC for a cross-DC clone."
-        )
+    preferred = (preferred_datacenter or "").strip()
+    if preferred and template_exists_in_datacenter(si, vm_name, preferred):
+        return preferred
+    found = find_template_datacenters(si, vm_name)
+    if preferred and preferred in found:
+        return preferred
+    if found:
+        return found[0]
     raise RuntimeError(
-        f"Packer template {vm_name!r} was not found in datacenter "
-        f"{datacenter_name!r} (and was not found as a VM template in any "
-        "other datacenter). Confirm the Packer golden exists as a vSphere "
-        f"template named {vm_name} (Mark as Template), then re-run "
+        f"Packer template {vm_name!r} was not found in any vSphere "
+        "datacenter. Terraform would fail with "
+        f"vm '{vm_name}' not found. Confirm the Packer golden exists as a "
+        f"vSphere template named {vm_name} (Mark as Template), then re-run "
         "`ovbuilder build`."
     )
 

@@ -8,13 +8,14 @@ import pytest
 import typer
 
 from ovbuilder.build import (
+    _compute_picker_rows,
     _prompt_compute_placement,
     _resolve_golden_and_compute,
     _verify_clone_template,
     apply_cli_placement,
 )
 from ovbuilder.config import OvbuilderConfig
-from ovbuilder.goldens import COMPUTE_TYPE_HOST, GoldenTemplate
+from ovbuilder.goldens import COMPUTE_TYPE_CLUSTER, COMPUTE_TYPE_HOST, GoldenTemplate
 from placeholders import placeholder_value
 
 
@@ -86,7 +87,7 @@ def test_resolve_golden_live_sets_source_dc_and_host_type():
     ), patch("ovbuilder.build.discover_goldens", return_value=live), patch(
         "ovbuilder.build.vsphere.classify_compute", return_value="host"
     ), patch(
-        "ovbuilder.build.vsphere.require_template"
+        "ovbuilder.build.vsphere.require_template", return_value="PDXC"
     ):
         name, guest_id, user, dc, compute = _resolve_golden_and_compute(
             cfg,
@@ -120,7 +121,7 @@ def test_resolve_golden_missing_template_fails_early():
         "ovbuilder.build.vsphere.require_template",
         side_effect=RuntimeError(
             "Packer template 'ovbuilder-ubuntu-24.04' was not found in "
-            "datacenter 'SEA3 - Bellevue'"
+            "any vSphere datacenter"
         ),
     ):
         with pytest.raises(typer.Exit):
@@ -140,12 +141,35 @@ def test_resolve_golden_missing_template_fails_early():
             )
 
 
-def test_verify_clone_template_exits_when_missing():
+def test_resolve_golden_fqdn_does_not_silently_default_to_cluster():
+    cfg = OvbuilderConfig()
+    creds = placeholder_value()
+    with patch(
+        "ovbuilder.build.vsphere.connect", side_effect=RuntimeError("vCenter down")
+    ), patch("ovbuilder.build.vsphere.disconnect"):
+        with pytest.raises(typer.Exit):
+            _resolve_golden_and_compute(
+                cfg,
+                vsphere_server="vc.example.com",
+                vsphere_user="operator",
+                vsphere_password=creds,
+                os_image="ubuntu-24.04",
+                template_name="",
+                guest_id="",
+                default_user="root",
+                template_datacenter="",
+                compute_type="cluster",
+                cluster_name="esx1.sea3.office.example.net",
+                datacenter="SEA3 - Bellevue",
+            )
+
+
+def test_verify_clone_template_exits_when_missing_everywhere():
     with patch(
         "ovbuilder.build.vsphere.require_template",
         side_effect=RuntimeError(
             "Packer template 'ovbuilder-ubuntu-24.04' was not found in "
-            "datacenter 'SEA3 - Bellevue'"
+            "any vSphere datacenter"
         ),
     ):
         with pytest.raises(typer.Exit):
@@ -157,36 +181,49 @@ def test_verify_clone_template_exits_when_missing():
             )
 
 
-def test_prompt_compute_uses_clusters_only_when_present():
+def test_verify_clone_template_returns_source_dc():
+    with patch("ovbuilder.build.vsphere.require_template", return_value="PDXC"):
+        assert (
+            _verify_clone_template(
+                object(),
+                template_name="ovbuilder-ubuntu-24.04",
+                template_datacenter="",
+                placement_datacenter="SEA3 - Bellevue",
+            )
+            == "PDXC"
+        )
+
+
+def test_compute_picker_rows_label_cluster_and_host():
+    rows = _compute_picker_rows(
+        ["Production Cluster"],
+        ["esx1.sea3.office.example.net"],
+    )
+    assert rows == [
+        ("Production Cluster", COMPUTE_TYPE_CLUSTER),
+        ("esx1.sea3.office.example.net", COMPUTE_TYPE_HOST),
+    ]
+
+
+def test_prompt_compute_always_classifies_selection():
+    si = object()
     with patch(
         "ovbuilder.build.vsphere.list_clusters",
-        return_value=["Production Cluster", "Lab Cluster"],
+        return_value=["Production Cluster"],
     ), patch(
         "ovbuilder.build.vsphere.list_standalone_hosts",
         return_value=["esx1.sea3.office.example.net"],
     ), patch(
-        "ovbuilder.build._prompt_table_choice", return_value="Production Cluster"
-    ) as prompt:
-        name, kind = _prompt_compute_placement(object(), "ATLC")
-    assert name == "Production Cluster"
-    assert kind == "cluster"
-    prompt.assert_called_once()
-    assert prompt.call_args[0][0] == "Clusters in ATLC"
-    assert prompt.call_args[0][1] == ["Production Cluster", "Lab Cluster"]
-
-
-def test_prompt_compute_hosts_only_when_no_cluster():
-    with patch("ovbuilder.build.vsphere.list_clusters", return_value=[]), patch(
-        "ovbuilder.build.vsphere.list_standalone_hosts",
-        return_value=["esx1.sea3.office.example.net", "esx2.sea3.office.example.net"],
+        "ovbuilder.build.Prompt.ask", return_value="2"
     ), patch(
-        "ovbuilder.build._prompt_table_choice",
-        return_value="esx1.sea3.office.example.net",
-    ) as prompt:
-        name, kind = _prompt_compute_placement(object(), "SEA3 - Bellevue")
+        "ovbuilder.build.vsphere.classify_compute", return_value="host"
+    ) as classify:
+        name, kind = _prompt_compute_placement(si, "SEA3 - Bellevue")
     assert name == "esx1.sea3.office.example.net"
     assert kind == COMPUTE_TYPE_HOST
-    assert "Standalone ESXi hosts" in prompt.call_args[0][0]
+    classify.assert_called_once_with(
+        si, "SEA3 - Bellevue", "esx1.sea3.office.example.net"
+    )
 
 
 def test_prompt_compute_refuses_when_no_cluster_or_host():
