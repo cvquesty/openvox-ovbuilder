@@ -31,3 +31,27 @@ def test_golden_help_mentions_both_platforms(monkeypatch, tmp_path):
     assert "OVBUILDER_GOLDEN_PASSWORD" in help_text
     assert "docs/SECRETS.md" in help_text
     assert "export" in help_text or "$env:" in help_text
+
+
+def test_allow_password_ssh_default_false(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVBUILDER_ALLOW_PASSWORD_SSH", raising=False)
+    from ovbuilder.secrets import allow_password_ssh
+
+    assert allow_password_ssh() is False
+
+
+def test_allow_password_ssh_env_opt_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("OVBUILDER_ALLOW_PASSWORD_SSH", "true")
+    from ovbuilder.secrets import allow_password_ssh
+
+    assert allow_password_ssh() is True
+
+
+def test_authorized_keys_file_default_path(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.delenv("OVBUILDER_SSH_AUTHORIZED_KEYS_FILE", raising=False)
+    from ovbuilder.secrets import ssh_authorized_keys_file
+
+    assert ssh_authorized_keys_file() == tmp_path / "cfg" / "ovbuilder" / "authorized_keys"

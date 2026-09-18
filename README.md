@@ -4,7 +4,7 @@
 
 **Build OpenVox-ready VMware VMs from Packer golden templates (or a legacy ISO) — without memorizing Terraform every time.**
 
-[![Version](https://img.shields.io/badge/version-0.97--beta27-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
+[![Version](https://img.shields.io/badge/version-0.97--beta29-orange?style=for-the-badge)](https://github.com/cvquesty/openvox-ovbuilder/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Terraform](https://img.shields.io/badge/Terraform-1.5%2B-7B42BC?style=for-the-badge&logo=terraform&logoColor=white)](https://terraform.io)
@@ -145,7 +145,7 @@ ovbuilder build
 ## Quick start
 
 1. Install Terraform and put it on your `PATH`.
-2. Create [secrets](docs/SECRETS.md) (`OVBUILDER_GOLDEN_PASSWORD`).
+2. Add SSH public keys (preferred) or opt-in password SSH — see [secrets](docs/SECRETS.md).
 3. Build Packer goldens once (see [packer/README.md](packer/README.md)), **or** skip ahead if templates already exist in vCenter.
 4. Run:
 
@@ -360,7 +360,9 @@ known_isos:
 | `OVBUILDER_ISO_DATASTORE` | Default ISO datastore |
 | `OVBUILDER_OPENVOX_SERVER` | OpenVox compile/CA host for agent install |
 | `OVBUILDER_PROVISION_MODE` | `golden` or `iso` |
-| `OVBUILDER_GOLDEN_PASSWORD` | Guest login password (see SECRETS.md) |
+| `OVBUILDER_GOLDEN_PASSWORD` | Guest login password when password SSH is opted in (see SECRETS.md) |
+| `OVBUILDER_ALLOW_PASSWORD_SSH` | Set to `1`/`true` to enable clone-time SSH password auth (default off) |
+| `OVBUILDER_SSH_AUTHORIZED_KEYS` | OpenSSH public keys for clone guestinfo (preferred) |
 | `XDG_CONFIG_HOME` / `XDG_DATA_HOME` | Override config/data roots on any OS |
 
 ```bash
@@ -400,7 +402,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta28` |
+| ovbuilder CLI | `0.97-beta29` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
