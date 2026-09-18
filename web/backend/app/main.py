@@ -13,7 +13,8 @@ from .api import inventory as inventory_api
 from .api import vms as vms_api
 from .api import settings as settings_api
 from .config import get_settings
-from .database import init_db
+from .database import active_job_counts, init_db
+from .models import BuildStatus
 
 settings = get_settings()
 
@@ -43,4 +44,26 @@ app.include_router(settings_api.router, prefix="/api/settings", tags=["settings"
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "app": settings.app_name}
+    payload = {
+        "status": "ok",
+        "app": settings.app_name,
+        "db_ok": False,
+        "queued": None,
+        "running": None,
+        "active": None,
+        "max_concurrent_builds": settings.max_concurrent_builds,
+        "max_queue_depth": settings.max_queue_depth,
+    }
+    try:
+        counts = await active_job_counts()
+        queued = counts.get(BuildStatus.queued.value, 0)
+        running = counts.get(BuildStatus.running.value, 0)
+        payload.update(
+            db_ok=True,
+            queued=queued,
+            running=running,
+            active=queued + running,
+        )
+    except Exception:  # noqa: BLE001 — liveness still 200; db_ok tells the truth
+        payload["status"] = "degraded"
+    return payload

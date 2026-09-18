@@ -124,7 +124,14 @@ def test_roles_is_public(auth_client):
 def test_health(auth_client):
     res = auth_client.get("/api/health")
     assert res.status_code == 200
-    assert res.json()["status"] == "ok"
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["db_ok"] is True
+    assert body["queued"] == 0
+    assert body["running"] == 0
+    assert body["active"] == 0
+    assert "max_concurrent_builds" in body
+    assert "max_queue_depth" in body
 
 
 def test_role_from_groups_precedence():

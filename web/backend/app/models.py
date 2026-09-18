@@ -8,8 +8,8 @@ from typing import FrozenSet, Optional
 
 from pydantic import BaseModel, Field
 
-# Fields that may be accepted on submit / passed to the worker, but must never
-# appear on API responses or in persisted job.request JSON.
+# Accepted on submit and stored for the Celery worker (job_id-only tasks).
+# Must never appear on API responses (BuildJobPublic / BuildRequestPublic).
 REQUEST_SECRET_FIELDS: FrozenSet[str] = frozenset({"vsphere_password"})
 
 
@@ -58,7 +58,7 @@ class BuildRequestBase(BaseModel):
 
 
 class BuildRequest(BuildRequestBase):
-    """Inbound / worker payload. Password is accepted here, never returned."""
+    """Inbound / persisted worker payload. Password is never returned on the API."""
 
     vsphere_password: Optional[str] = None
 
@@ -74,6 +74,10 @@ class BuildStatus(str, Enum):
     failed = "failed"
     cancelling = "cancelling"
     cancelled = "cancelled"
+
+
+# Occupies a worker slot or a queue slot for host-wide backpressure.
+ACTIVE_BUILD_STATUSES: tuple[BuildStatus, ...] = (BuildStatus.queued, BuildStatus.running)
 
 
 class BuildJob(BaseModel):
@@ -92,7 +96,7 @@ class BuildJob(BaseModel):
 
 
 def redact_build_request(req: BuildRequest) -> BuildRequest:
-    """Return a copy with secret fields cleared for durable storage."""
+    """Return a copy with secret fields cleared (API/public copies, not the worker row)."""
     return req.model_copy(update={field: None for field in REQUEST_SECRET_FIELDS})
 
 
