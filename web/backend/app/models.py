@@ -19,6 +19,23 @@ class Role(str, Enum):
     viewer = "viewer"
 
 
+def coerce_role(value: object, default: Role = Role.viewer) -> Role:
+    """Parse a role string; unknown values become *default* (never raise)."""
+    if isinstance(value, Role):
+        return value
+    if isinstance(value, str):
+        try:
+            return Role(value)
+        except ValueError:
+            return default
+    return default
+
+
+def effective_role(ldap_role: Role, role_override: Optional[Role] = None) -> Role:
+    """Local override wins; otherwise the directory-mapped role."""
+    return role_override if role_override is not None else ldap_role
+
+
 class BuildRequestBase(BaseModel):
     """Non-secret build fields shared by submit, persist, and responses."""
 
@@ -114,3 +131,21 @@ class UserOut(BaseModel):
     role: Role
     display_name: Optional[str] = None
     email: Optional[str] = None
+
+
+class UserAdminOut(BaseModel):
+    """Admin view of a persisted user and how their role was chosen."""
+
+    username: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    ldap_role: Role
+    role_override: Optional[Role] = None
+    role: Role
+    ldap_checked_at: Optional[datetime] = None
+
+
+class RoleOverrideIn(BaseModel):
+    """Set or clear a local role override. ``null`` clears (LDAP mapping wins)."""
+
+    role_override: Optional[Role] = None

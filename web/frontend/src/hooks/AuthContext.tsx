@@ -32,10 +32,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const applyMe = (data: { username: string; role: string; display_name?: string; email?: string }) => {
+      setUser({ username: data.username, role: data.role, display_name: data.display_name, email: data.email });
+    };
+
     auth.me()
-      .then((data) => setUser({ username: data.username, role: data.role, display_name: data.display_name, email: data.email }))
+      .then(applyMe)
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
+
+    // Server role can change (override or LDAP) without a new JWT. Refresh
+    // periodically and when the tab becomes visible again.
+    const refresh = () => {
+      if (!localStorage.getItem('ovbuilder_token')) return;
+      auth.me().then(applyMe).catch(() => { /* 401 handled globally */ });
+    };
+    const interval = window.setInterval(refresh, 60_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, []);
 
   useEffect(() => {
