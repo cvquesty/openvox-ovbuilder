@@ -5,6 +5,16 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta22] - 2026-09-17
+
+### Added
+
+- **Web backend smoke tests** — OAuth2 form-urlencoded login
+  (success/failure/LDAP-disabled) and viewer/builder/admin JWT gates on
+  `/api/builds`, layered on the job-store and security suites from #27/#28.
+  Fixtures pin `SECRET_KEY` (fail-fast outside DEBUG) and use the sqlite
+  `configure_database()` job store. No live LDAP, Postgres, or ovbuilder CLI.
+
 ## [0.97-beta21] - 2026-09-17
 
 ### Fixed

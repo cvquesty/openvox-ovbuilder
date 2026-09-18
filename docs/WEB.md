@@ -124,3 +124,19 @@ Setting it to `false` is an explicit insecure lab opt-in and is logged.
 `LDAP_CA_CERTS_FILE` is passed to ldap3 `Tls(ca_certs_file=...)`. Use it
 when the directory is signed by an internal CA that is not in the host
 trust store. Example: `/etc/pki/tls/certs/example-ldap-ca.pem`.
+
+## Backend tests
+
+Pytest covers the login contract, build RBAC, the Postgres job store
+(sqlite fixture), and secret redaction. LDAP and Celery are mocked; tests
+do not need a live directory, Redis, Postgres, or the `ovbuilder` CLI.
+
+`SECRET_KEY` must be set (fail-fast unless `DEBUG=true`). The suite pins
+one in `tests/conftest.py`.
+
+```bash
+cd web/backend
+pip install -r requirements.txt pytest
+# optional extras listed in requirements-dev.txt
+SECRET_KEY=test-secret-key-that-is-long-enough-32ch PYTHONPATH=. python -m pytest -q
+```
