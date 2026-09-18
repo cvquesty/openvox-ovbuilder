@@ -96,6 +96,9 @@ export const inventory = {
   environments: () => request<Environment[]>('/inventory/environments'),
   clusters: () => request<string[]>('/inventory/clusters'),
   networks: () => request<string[]>('/inventory/networks'),
+  datacenters: () => request<string[]>('/inventory/datacenters'),
+  datastoreClusters: () => request<string[]>('/inventory/datastore-clusters'),
+  datastores: () => request<string[]>('/inventory/datastores'),
 };
 
 export const vms = {
@@ -126,6 +129,8 @@ export interface BuildRequest {
   gateway?: string;
   dns?: string[];
   environment: string;
+  cluster?: string;
+  network?: string;
   location?: string;
   vsphere_server?: string;
   vsphere_user?: string;
@@ -159,6 +164,7 @@ export interface Environment {
   key: string;
   label: string;
   datastore_cluster: string;
+  cluster?: string;
 }
 
 export interface InventoryVm {

@@ -2,7 +2,8 @@
 
 SECRET_KEY is pinned before app.config is imported (fail-fast unless DEBUG).
 The store uses sqlite via configure_database() so tests do not need
-Postgres, Redis, a live directory, or a live ovbuilder CLI.
+Postgres, Redis, a live directory, vCenter, or a live ovbuilder CLI.
+Inventory tests mock the vSphere session.
 
 LDAP group refresh is stubbed as unavailable by default so `/me` and RBAC
 tests bootstrap from the JWT hint without a 10s TCP timeout. Tests that
@@ -12,12 +13,19 @@ exercise freshness patch `app.auth.ldap_lookup_user` themselves.
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 # Must be set before app.config.get_settings() is first called.
 os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-long-enough-32ch")
 os.environ.setdefault("DEBUG", "false")
+# Auth smoke tests mock ldap_authenticate; keep LDAP enabled so login is not 503.
 os.environ.setdefault("LDAP_ENABLED", "true")
 os.environ.setdefault("ROLE_CACHE_TTL_SECONDS", "60")
+
+BACKEND = Path(__file__).resolve().parents[1]
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,6 +35,8 @@ from app.auth import LdapUnavailable, create_token
 from app.config import get_settings
 from app.main import app
 from app.models import Role
+
+get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)

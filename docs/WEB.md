@@ -1,7 +1,8 @@
 # OV Builder web platform
 
-Self-service frontend for `ovbuilder`. LDAP users pick OS + environment + size,
-submit, and the dedicated box runs the CLI in parallel via Celery.
+Self-service frontend for `ovbuilder`. LDAP users pick OS + environment +
+compute cluster + network + size, submit, and the dedicated box runs the CLI
+in parallel via Celery.
 
 The CLI installer (`./install.sh`) does **not** install this stack. Laptop and
 workstation users who only want `ovbuilder` can ignore this document.
@@ -10,11 +11,45 @@ workstation users who only want `ovbuilder` can ignore this document.
 
 | Role | LDAP group (default) | Can |
 |---|---|---|
-| admin | ovbuilder-admins | everything, including VM destroy and role overrides |
-| builder | ovbuilder-builders | submit builds, power/snapshot |
+| admin | ovbuilder-admins | everything, including VM destroy, Settings, and role overrides |
+| builder | ovbuilder-builders | submit builds, read inventory, power/snapshot |
 | viewer | ovbuilder-viewers | watch jobs |
 
-Users never pick a datastore. `dev` maps to `YAVIN-DEV`, `prod` to `YAVIN-PROD`.
+Inventory (`/api/inventory/*`) is **admin + builder only**. Viewers receive 403.
+
+Users never pick an individual datastore LUN. They pick an **environment**
+(`dev` / `prod` or whatever you configure). The backend maps that key to a
+Storage DRS cluster from a **single source of truth**:
+
+1. `environments:` in `~/.config/ovbuilder/config.yaml` (or `$XDG_CONFIG_HOME/ovbuilder/`)
+2. Overlay env vars `OVBUILDER_ENV_<KEY>_DATASTORE_CLUSTER` / `_CLUSTER` / `_LABEL`
+3. Built-in defaults (`dev` → `YAVIN-DEV`, `prod` → `YAVIN-PROD`)
+
+The Celery worker uses the same mapping (`ovbuilder.placement`) when it
+passes `--vm-datastore-cluster` to the CLI.
+
+## vSphere credentials (required for live inventory)
+
+Live cluster / network / datacenter / datastore-cluster lists talk to vCenter
+through `ovbuilder.vsphere` (pyVmomi). There is no second client.
+
+Resolve credentials in this order (`web/backend/app/vsphere_client.py`):
+
+1. Admin **Configuration** page (runtime settings JSON on the server)
+2. Web process environment / `.env`:
+   - `VSPHERE_SERVER`
+   - `VSPHERE_USER`
+   - `VSPHERE_PASSWORD` (or `OVBUILDER_VSPHERE_PASSWORD`)
+   - `VSPHERE_DATACENTER` (required when more than one datacenter is visible)
+   - `VSPHERE_IGNORE_SSL` (lab default `true`)
+3. CLI `config.yaml` for server / datacenter / SSL when a web field is empty
+
+If credentials are missing or vCenter is unreachable, live inventory endpoints
+return **HTTP 502** with a clear error. The Build form shows a warning and
+still allows submit using config defaults. It never silently invents cluster
+or network names.
+
+CI mocks the vSphere session. No live vCenter is required for tests.
 
 ### How a role is chosen (every request)
 
@@ -142,10 +177,14 @@ Overrides (optional):
 | `OVBUILDER_CORS_ORIGINS` | JSON list, e.g. `["https://builder.example.com"]` |
 
 3. Edit `/opt/ovbuilder/web/backend/.env` — LDAP bind password, CORS origin,
-   vSphere. See [Secrets and TLS](#secrets-and-tls). `SECRET_KEY` is generated
-   on first seed if empty. Placeholder values (`change-me-in-production`, keys
-   shorter than 32 characters) fail the installer. An empty `DATABASE_URL`
-   also fails.
+   and vSphere (`VSPHERE_SERVER` / `VSPHERE_USER` / `VSPHERE_PASSWORD` /
+   `VSPHERE_DATACENTER`). See [Secrets and TLS](#secrets-and-tls) and
+   `.env.example`. `SECRET_KEY` is generated on first seed if empty.
+   Placeholder values (`change-me-in-production`, keys shorter than 32
+   characters) fail the installer. An empty `DATABASE_URL` also fails.
+   Optionally set `environments:` in the ovbuilder `config.yaml` used by the
+   service account (`OVBUILDER_HOME` / `XDG_CONFIG_HOME`) so the Build form
+   maps `dev`/`prod` to the right Storage DRS cluster.
 
 4. Start the units (if you did not pass `--start`):
 
@@ -268,10 +307,17 @@ workers do not share a state file. Do not run bare `terraform apply` inside
 - `PUT /api/auth/users/{username}` — admin: set or clear `role_override`
 - `POST /api/builds` — queue a build
 - `POST /api/builds/{id}/cancel` — stop a queued/running job
-- `GET /api/inventory/{os-images,environments,clusters,networks,datacenters}`
+- `GET /api/inventory/os-images` — Packer goldens from config
+- `GET /api/inventory/environments` — env → datastore-cluster mapping
+- `GET /api/inventory/clusters` — live compute clusters (502 if vSphere down)
+- `GET /api/inventory/networks` — live port groups (502 if vSphere down)
+- `GET /api/inventory/datacenters` — live datacenters (502 if vSphere down)
+- `GET /api/inventory/datastore-clusters` — live Storage DRS names
+- `GET /api/inventory/datastores` — live datastores (not offered as a form picker)
 - `GET /api/vms` — live VM list
 - `POST /api/vms/{name}/power-on|power-off|reboot|snapshot`
 - `DELETE /api/vms/{name}` — admin only
+- `GET|PUT /api/settings` — admin-only vSphere + npm registry
 
 ## Secrets and TLS
 
@@ -317,8 +363,9 @@ trust store. Example: `/etc/pki/tls/certs/example-ldap-ca.pem`.
 ## Backend tests
 
 Pytest covers the login contract, build RBAC, the Postgres job store
-(sqlite fixture), and secret redaction. LDAP and Celery are mocked; tests
-do not need a live directory, Redis, Postgres, or the `ovbuilder` CLI.
+(sqlite fixture), secret redaction, and live inventory endpoints (vSphere
+client mocked). LDAP and Celery are mocked; tests do not need a live
+directory, Redis, Postgres, vCenter, or the `ovbuilder` CLI.
 
 `SECRET_KEY` must be set (fail-fast unless `DEBUG=true`). The suite pins
 one in `tests/conftest.py`.

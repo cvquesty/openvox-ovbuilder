@@ -5,6 +5,27 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta27] - 2026-09-18
+
+### Added
+
+- **Live vSphere inventory for the web Build form** — `/api/inventory/clusters`,
+  `/networks`, `/datacenters`, `/datastore-clusters`, and `/datastores` call
+  `ovbuilder.vsphere` with the same credentials as VM lifecycle. Unreachable
+  vCenter returns HTTP 502 instead of fake names. OS images and environments
+  stay config-backed.
+- **Single environment → datastore-cluster mapping** — `environments:` in
+  `config.yaml` (overlay with `OVBUILDER_ENV_<KEY>_DATASTORE_CLUSTER`) is the
+  only source used by the inventory API and the Celery worker.
+- **CLI placement flags** for non-interactive web builds: `--cluster`,
+  `--network`, `--vm-datastore-cluster`, `--datacenter`.
+
+### Changed
+
+- Build form selects live compute cluster and network. Storage DRS is still
+  chosen from the environment (operators never pick a LUN).
+- Inventory remains admin/builder only (viewers get 403).
+
 ## [0.97-beta26] - 2026-09-18
 
 ### Fixed

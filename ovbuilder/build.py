@@ -144,6 +144,31 @@ def _coerce_sizing(val: Any, default: int) -> int:
         return int(default)
 
 
+def apply_cli_placement(
+    cfg: OvbuilderConfig,
+    *,
+    cluster: Optional[str] = None,
+    networks: Optional[List[str]] = None,
+    vm_datastore_cluster: Optional[str] = None,
+    datacenter: Optional[str] = None,
+) -> None:
+    """Apply non-interactive placement flags onto the in-memory config."""
+    if cluster:
+        cfg.cluster = cluster.strip()
+    if networks:
+        parsed: List[str] = []
+        for item in networks:
+            if not item:
+                continue
+            parsed.extend(part.strip() for part in str(item).split(",") if part.strip())
+        if parsed:
+            cfg.networks = parsed
+    if vm_datastore_cluster:
+        cfg.vm_datastore_cluster = vm_datastore_cluster.strip()
+    if datacenter:
+        cfg.datacenter = datacenter.strip()
+
+
 def _normalize_provision_mode(mode: Optional[str], cfg_mode: str) -> str:
     """
     Map CLI/config aliases to internal golden | iso.
@@ -255,6 +280,22 @@ def build(
         "--location",
         help="Site code (ATLC, PDXC, …). Compiler VIP is chosen from this.",
     ),
+    cluster: Optional[str] = typer.Option(
+        None, "--cluster", help="Compute cluster name"
+    ),
+    network: Optional[List[str]] = typer.Option(
+        None,
+        "--network",
+        help="Port group / network name. Repeat the flag or comma-separate.",
+    ),
+    vm_datastore_cluster: Optional[str] = typer.Option(
+        None,
+        "--vm-datastore-cluster",
+        help="Storage DRS cluster (e.g. YAVIN-DEV). Preferred over a single LUN.",
+    ),
+    datacenter: Optional[str] = typer.Option(
+        None, "--datacenter", help="vSphere datacenter name"
+    ),
 ):
     """
     Build a VM from a Packer golden template (default) or legacy ISO.
@@ -296,6 +337,14 @@ def build(
         skip_dnf_groups = False
     if _is_optioninfo(location):
         location = None
+    if _is_optioninfo(cluster):
+        cluster = None
+    if _is_optioninfo(network):
+        network = None
+    if _is_optioninfo(vm_datastore_cluster):
+        vm_datastore_cluster = None
+    if _is_optioninfo(datacenter):
+        datacenter = None
 
     # Prefer env / secrets.env over ``--vsphere-password`` on argv (ps-visible).
     vsphere_password = get_vsphere_password(vsphere_password)
@@ -637,6 +686,13 @@ def build(
         disk = cfg.default_disk_gb if disk is None else disk
         vsphere_server = vsphere_server or cfg.vsphere_server
         cfg.vsphere_server = vsphere_server
+        apply_cli_placement(
+            cfg,
+            cluster=cluster,
+            networks=network,
+            vm_datastore_cluster=vm_datastore_cluster,
+            datacenter=datacenter,
+        )
 
     # =====================================================================
     # COMMON: sizing coerce + Terraform apply

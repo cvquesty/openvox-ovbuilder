@@ -48,7 +48,9 @@ class BuildRequestBase(BaseModel):
     disk_gb: int = 80
     gateway: Optional[str] = None
     dns: list[str] = Field(default_factory=list)
-    environment: str = Field("dev", description="dev | prod")
+    environment: str = Field("dev", description="dev | prod — maps to a datastore cluster")
+    cluster: Optional[str] = Field(None, description="Compute cluster from live inventory")
+    network: Optional[str] = Field(None, description="Port group / network from live inventory")
     location: Optional[str] = None
     vsphere_server: Optional[str] = None
     vsphere_user: Optional[str] = None
