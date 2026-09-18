@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ovbuilder"
-version = "0.97-beta25"
+version = "0.97-beta26"
 description = "ovbuilder — OpenVox command-line tool for building VMware VMs from ISO"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -46,3 +46,5 @@ include = ["ovbuilder*"]
 # web/backend/tests (those run from web/backend with their own deps).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# So `pytest -q` (CI) and `python -m pytest` both resolve helpers in tests/.
+pythonpath = ["tests"]

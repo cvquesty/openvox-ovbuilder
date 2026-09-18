@@ -5,6 +5,15 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta26] - 2026-09-18
+
+### Fixed
+
+- **CLI pytest collection in CI** — `pytest -q` (not `python -m pytest`) does
+  not put the repo root on `sys.path`, so `from tests.placeholders` failed
+  collection. Helpers are imported as `placeholders` and `pythonpath = tests`
+  is set in `pyproject.toml`.
+
 ## [0.97-beta25] - 2026-09-18
 
 ### Security

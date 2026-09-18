@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ovbuilder.secrets import get_vsphere_password
 
-from tests.placeholders import placeholder_value
+from placeholders import placeholder_value
 
 
 def test_explicit_password_wins(monkeypatch):

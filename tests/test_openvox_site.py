@@ -9,7 +9,7 @@ from ovbuilder.openvox_site import (
     site_for,
 )
 
-from tests.placeholders import placeholder_value
+from placeholders import placeholder_value
 
 
 def test_infer_location_from_domain():

@@ -13,7 +13,7 @@ from ovbuilder.cloud_init import (
 )
 from ovbuilder.openvox_site import DEFAULT_SITES
 
-from tests.placeholders import placeholder_value
+from placeholders import placeholder_value
 
 
 def test_metadata_is_identity_only():
