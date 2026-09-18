@@ -8,6 +8,8 @@ Type=simple
 User=ovbuilder
 Group=ovbuilder
 WorkingDirectory=/opt/ovbuilder/web/backend
+Environment=HOME=/opt/ovbuilder
+Environment=PATH=/opt/ovbuilder/venv/bin:/usr/local/bin:/usr/bin
 Environment=PYTHONPATH=/opt/ovbuilder/web/backend
 EnvironmentFile=-/opt/ovbuilder/web/backend/.env
 ExecStart=/opt/ovbuilder/venv/bin/celery -A app.tasks.celery_app worker --loglevel=info

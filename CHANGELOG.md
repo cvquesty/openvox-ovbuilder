@@ -5,6 +5,17 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta24] - 2026-09-18
+
+### Added
+
+- **Bare-metal web deploy** — `web/install-web.sh` is a repeatable installer
+  for the SPA + FastAPI + Celery stack: venv deps, locked-down `.env`
+  (generated `SECRET_KEY`, required `DATABASE_URL`, Redis/CORS/LDAP
+  placeholders), Alembic `upgrade head`, nginx SPA + `/api` proxy, and
+  systemd units. CLI-only `./install.sh` is unchanged. Operator steps and
+  health checks: `docs/WEB.md`. Template: `web/nginx/ovbuilder.conf`.
+
 ## [0.97-beta23] - 2026-09-18
 
 ### Added
