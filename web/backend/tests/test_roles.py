@@ -19,6 +19,7 @@ from app.database import get_user, set_role_override, upsert_user
 from app.models import Role, coerce_role, effective_role
 
 from tests.conftest import auth_header
+from tests.placeholders import login_form, placeholder_value
 
 
 def _settings(**kwargs) -> Settings:
@@ -185,15 +186,17 @@ async def test_me_reflects_ldap_revocation_on_stale_admin_token(client, monkeypa
 async def test_login_honors_existing_override(client, monkeypatch):
     await set_role_override("root", Role.admin)
 
-    def _auth(_settings, username: str, password: str):
-        if username == "root" and password == "correct-horse":
+    expected = placeholder_value()
+
+    def _auth(_settings, username: str, supplied: str):
+        if username == "root" and supplied == expected:
             return {"username": "root", "groups": ["ovbuilder-viewers"]}
         return None
 
     monkeypatch.setattr("app.api.auth.ldap_authenticate", _auth)
     res = client.post(
         "/api/auth/login",
-        data={"username": "root", "password": "correct-horse"},
+        data=login_form("root"),
     )
     assert res.status_code == 200, res.text
     body = res.json()

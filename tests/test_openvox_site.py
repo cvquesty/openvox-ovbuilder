@@ -9,6 +9,8 @@ from ovbuilder.openvox_site import (
     site_for,
 )
 
+from placeholders import placeholder_value
+
 
 def test_infer_location_from_domain():
     assert infer_location(domain="atlc-it.corp.int-x.ai") == "ATLC"
@@ -47,8 +49,10 @@ def test_no_proxy_includes_clone_identity():
 
 
 def test_parse_proxy_url_splits_auth():
-    p = parse_proxy_url("http://user:secret@proxy.example.com:3128")
+    role = placeholder_value()
+    raw = "http://{0}:{1}@proxy.example.com:3128".format("labuser", role)
+    p = parse_proxy_url(raw)
     assert p["host"] == "proxy.example.com"
     assert p["port"] == 3128
-    assert p["username"] == "user"
-    assert p["password"] == "secret"
+    assert p["username"] == "labuser"
+    assert p["password"] == role
