@@ -400,7 +400,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta27` |
+| ovbuilder CLI | `0.97-beta28` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |

@@ -3,6 +3,8 @@
 #
 # Package set: @core + Tools/cloud-init. Packer waits for poweroff after %post.
 # Clone identity (hostname / static IP) comes from ovbuilder guestinfo later.
+# Root is locked. sudo is password-required via wheel (no NOPASSWD).
+# Packer uses communicator = "none"; it does not SSH during the golden build.
 
 text
 cdrom
@@ -12,15 +14,16 @@ timezone UTC --utc
 
 # AlmaLinux 10: network hostname only; clones get real addressing later.
 network --hostname=localhost.localdomain
-firewall --disabled
-selinux --permissive
+firewall --enabled --ssh
+selinux --enforcing
 services --enabled="sshd,chronyd"
 
 ignoredisk --only-use=sda
 clearpart --all --initlabel --drives=sda
 autopart --type=plain
 
-rootpw --plaintext ${ssh_password}
+# Operator login is the almalinux user. Password comes from gitignored pkrvars.
+rootpw --lock
 user --name=almalinux --groups=wheel --password=${ssh_password} --plaintext
 
 bootloader --location=mbr --boot-drive=sda
@@ -43,8 +46,10 @@ tar
 %post --log=/root/ks-post.log
 set +e
 
-echo 'almalinux ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/almalinux
-chmod 440 /etc/sudoers.d/almalinux
+# Password-required sudo for wheel (covers almalinux). No NOPASSWD drop-in.
+echo '%wheel ALL=(ALL) ALL' > /etc/sudoers.d/wheel
+chmod 440 /etc/sudoers.d/wheel
+rm -f /etc/sudoers.d/almalinux /etc/sudoers.d/cloud-user
 
 systemctl enable sshd.service chronyd.service 2>/dev/null
 systemctl enable vmtoolsd.service 2>/dev/null
@@ -58,6 +63,10 @@ datasource:
   VMware:
     allow_raw_data: true
 EOF
+
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -R /etc/sudoers.d /etc/cloud 2>/dev/null || true
+fi
 
 if command -v cloud-init >/dev/null 2>&1; then
   cloud-init clean --logs --seed 2>/dev/null || cloud-init clean --logs 2>/dev/null || true

@@ -3,9 +3,10 @@
 # Templated by Packer: ssh_password + ssh_password_crypted from local pkrvars
 # (never commit real values). Generate crypted: openssl passwd -6 'your-password'
 #
-# The ubuntu user is created with password 'ubuntu' and the password is expired
-# on first login (chage -d 0). Puppet removes the account on its first run, so
-# the credential is single-use and never lingers.
+# The ubuntu user is created with the operator-supplied password only.
+# Do not bake a well-known default password into this seed.
+# Root is locked. sudo requires the operator password (no NOPASSWD).
+# Packer uses communicator = "none"; it does not SSH during the golden build.
 autoinstall:
   version: 1
   locale: en_US.UTF-8
@@ -36,27 +37,19 @@ autoinstall:
     - cloud-guest-utils
     - curl
   user-data:
-    disable_root: false
+    disable_root: true
     package_update: false
     package_upgrade: false
     users:
       - name: ubuntu
         groups: [sudo]
         shell: /bin/bash
-        sudo: ALL=(ALL) NOPASSWD:ALL
         lock_passwd: false
-        # Expire the password so the first interactive login forces a change
-        # (or Puppet deletes the account entirely on its first run).
-        expire: true
   late-commands:
-    - echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/ubuntu
-    - chmod 440 /target/etc/sudoers.d/ubuntu
-    # Set the well-known initial password, then expire it immediately.
-    - curtin in-target --target=/target -- bash -c "echo 'ubuntu:ubuntu' | chpasswd"
-    - curtin in-target --target=/target -- chage -d 0 ubuntu || true
-    - curtin in-target --target=/target -- bash -c "echo 'root:${ssh_password}' | chpasswd"
-    - curtin in-target --target=/target -- passwd -u ubuntu || true
-    - curtin in-target --target=/target -- passwd -u root || true
+    # Re-apply the operator password from pkrvars so console/SSH login works
+    # if autoinstall identity hashing is ignored. Never use a baked-in default.
+    - curtin in-target --target=/target -- bash -c "echo 'ubuntu:${ssh_password}' | chpasswd"
+    - curtin in-target --target=/target -- passwd -l root || true
     - curtin in-target --target=/target -- systemctl enable open-vm-tools.service || true
     - curtin in-target --target=/target -- systemctl enable ssh.service || true
     - curtin in-target --target=/target -- systemctl enable cloud-init.service cloud-init-local.service cloud-config.service cloud-final.service || true

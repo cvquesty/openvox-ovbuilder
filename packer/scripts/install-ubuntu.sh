@@ -21,10 +21,8 @@ apt-get -y install \
 systemctl enable open-vm-tools.service 2>/dev/null || true
 systemctl enable cloud-init.service cloud-init-local.service cloud-config.service cloud-final.service 2>/dev/null || true
 
-if id ubuntu &>/dev/null; then
-  echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/ubuntu
-  chmod 440 /etc/sudoers.d/ubuntu
-fi
+# Password-required sudo comes from the sudo group. Do not grant NOPASSWD.
+rm -f /etc/sudoers.d/ubuntu
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*
