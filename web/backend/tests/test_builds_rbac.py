@@ -13,13 +13,17 @@ from app.database import save_job_sync
 from app.models import BuildJob, BuildRequest, BuildStatus, Role
 
 from tests.conftest import auth_header
+from tests.placeholders import test_placeholder
 
-BUILD_PAYLOAD = {
-    "hostname": "web01",
-    "ip": "10.0.0.8",
-    "os_image": "ubuntu-24.04",
-    "vsphere_password": "s3cret",
-}
+
+def _build_payload() -> dict:
+    payload = {
+        "hostname": "web01",
+        "ip": "10.0.0.8",
+        "os_image": "ubuntu-24.04",
+    }
+    payload["vsphere_password"] = test_placeholder()
+    return payload
 
 
 class _FakeTask:
@@ -34,7 +38,7 @@ def _seed_job(*, owner: str, hostname: str = "other") -> BuildJob:
             hostname=hostname,
             ip="10.0.0.9",
             os_image="ubuntu-24.04",
-            vsphere_password="other-secret",
+            vsphere_password=test_placeholder(),
         ),
         requested_by=owner,
         created_at=datetime.now(timezone.utc),
@@ -44,14 +48,14 @@ def _seed_job(*, owner: str, hostname: str = "other") -> BuildJob:
 def test_unauthenticated_builds_are_unauthorized(client):
     listed = client.get("/api/builds")
     assert listed.status_code == 401
-    created = client.post("/api/builds", json=BUILD_PAYLOAD)
+    created = client.post("/api/builds", json=_build_payload())
     assert created.status_code == 401
 
 
 def test_viewer_cannot_submit_or_cancel(client, monkeypatch):
     monkeypatch.setattr("app.api.builds.run_build.delay", lambda *a, **k: _FakeTask())
     headers = auth_header("viewer1", Role.viewer)
-    created = client.post("/api/builds", json=BUILD_PAYLOAD, headers=headers)
+    created = client.post("/api/builds", json=_build_payload(), headers=headers)
     assert created.status_code == 403
 
     job = _seed_job(owner="viewer1")

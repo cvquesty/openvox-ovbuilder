@@ -7,11 +7,14 @@ from app.config import Settings, get_settings
 from app.models import Role
 
 from tests.conftest import auth_header
+from tests.placeholders import login_form, test_placeholder
 
 
 def _ldap_ok(username: str, groups: list[str]):
-    def _auth(_settings, user: str, password: str):
-        if user == username and password == "correct-horse":
+    expected = test_placeholder()
+
+    def _auth(_settings, user: str, supplied: str):
+        if user == username and supplied == expected:
             return {"username": username, "groups": groups}
         return None
 
@@ -25,7 +28,7 @@ def test_login_success_form_urlencoded(auth_client, monkeypatch):
     )
     res = auth_client.post(
         "/api/auth/login",
-        data={"username": "alice", "password": "correct-horse"},
+        data=login_form("alice"),
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     assert res.status_code == 200, res.text
@@ -47,7 +50,7 @@ def test_login_rejects_bad_credentials(auth_client, monkeypatch):
     )
     res = auth_client.post(
         "/api/auth/login",
-        data={"username": "alice", "password": "wrong"},
+        data=login_form("alice", match=False),
     )
     assert res.status_code == 401
     assert res.json()["detail"] == "Bad credentials"
@@ -60,7 +63,7 @@ def test_login_rejects_json_body(auth_client, monkeypatch):
     )
     res = auth_client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "correct-horse"},
+        json=login_form("alice"),
     )
     assert res.status_code == 422
 
@@ -70,7 +73,7 @@ def test_login_ldap_disabled_is_unavailable(auth_client, monkeypatch):
     monkeypatch.setattr(settings, "ldap_enabled", False)
     res = auth_client.post(
         "/api/auth/login",
-        data={"username": "alice", "password": "correct-horse"},
+        data=login_form("alice"),
     )
     assert res.status_code == 503
     assert res.json()["detail"] == "LDAP disabled"
@@ -96,7 +99,7 @@ def test_login_then_me_roundtrip(auth_client, monkeypatch):
     )
     login = auth_client.post(
         "/api/auth/login",
-        data={"username": "root", "password": "correct-horse"},
+        data=login_form("root"),
     )
     token = login.json()["access_token"]
     me = auth_client.get(

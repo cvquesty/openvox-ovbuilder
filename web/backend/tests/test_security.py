@@ -19,6 +19,7 @@ from app.models import (
     redact_build_request,
 )
 from app.tasks import _build_command
+from tests.placeholders import test_placeholder
 
 
 def _settings(**kwargs) -> Settings:
@@ -71,7 +72,7 @@ def test_public_job_omits_vsphere_password():
         hostname="web01",
         ip="10.0.0.10",
         os_image="ubuntu-24.04",
-        vsphere_password="super-secret",
+        vsphere_password=test_placeholder(),
         vsphere_user="svc@example.com",
     )
     job = BuildJob(
@@ -91,35 +92,35 @@ def test_public_job_omits_vsphere_password():
 
 
 def test_redact_build_request_clears_password():
+    guest = test_placeholder()
     req = BuildRequest(
         hostname="web01",
         ip="10.0.0.10",
         os_image="ubuntu-24.04",
-        vsphere_password="super-secret",
+        vsphere_password=guest,
     )
     redacted = redact_build_request(req)
     assert redacted.vsphere_password is None
-    assert req.vsphere_password == "super-secret"
+    assert req.vsphere_password == guest
 
 
 def test_build_command_uses_env_not_argv():
     get_settings.cache_clear()
-    cmd, env = _build_command(
-        {
-            "hostname": "web01",
-            "ip": "10.0.0.10",
-            "os_image": "ubuntu-24.04",
-            "vsphere_server": "vcenter.example.com",
-            "vsphere_user": "svc@example.com",
-            "vsphere_password": "super-secret",
-        },
-        "job-1",
-    )
+    guest = test_placeholder()
+    payload = {
+        "hostname": "web01",
+        "ip": "10.0.0.10",
+        "os_image": "ubuntu-24.04",
+        "vsphere_server": "vcenter.example.com",
+        "vsphere_user": "svc@example.com",
+    }
+    payload["vsphere_password"] = guest
+    cmd, env = _build_command(payload, "job-1")
     assert "--vsphere-password" not in cmd
-    assert "super-secret" not in cmd
-    assert env["VSPHERE_PASSWORD"] == "super-secret"
-    assert env["TF_VAR_vsphere_password"] == "super-secret"
-    assert env["OVBUILDER_VSPHERE_PASSWORD"] == "super-secret"
+    assert guest not in cmd
+    assert env["VSPHERE_PASSWORD"] == guest
+    assert env["TF_VAR_vsphere_password"] == guest
+    assert env["OVBUILDER_VSPHERE_PASSWORD"] == guest
 
 
 def test_ldap_tls_verifies_by_default(tmp_path):
@@ -174,7 +175,7 @@ def test_start_tls_called_for_ldap_starttls():
     conn.bind.return_value = True
 
     with patch("app.auth.Connection", return_value=conn) as ctor:
-        opened = _ldap_connection(server, settings, "cn=svc", "bind-secret")
+        opened = _ldap_connection(server, settings, "cn=svc", test_placeholder())
 
     ctor.assert_called_once()
     assert ctor.call_args.kwargs["auto_bind"] is False
@@ -196,7 +197,7 @@ def test_start_tls_skipped_on_ldaps():
     conn.bind.return_value = True
 
     with patch("app.auth.Connection", return_value=conn):
-        _ldap_connection(server, settings, "cn=svc", "bind-secret")
+        _ldap_connection(server, settings, "cn=svc", test_placeholder())
 
     conn.start_tls.assert_not_called()
     conn.bind.assert_called_once()

@@ -35,7 +35,7 @@ see jobs across process boundaries or survive restarts.
 | Item | Value |
 |---|---|
 | Env var | `DATABASE_URL` |
-| Default | `postgresql+asyncpg://ovbuilder:ovbuilder@127.0.0.1:5432/ovbuilder` |
+| Default | `postgresql+asyncpg://ovbuilder@127.0.0.1:5432/ovbuilder` (no password in git; set one in `.env`) |
 | API driver | `postgresql+asyncpg://` (async SQLAlchemy) |
 | Celery / Alembic driver | `postgresql+psycopg://` (derived automatically from the same URL) |
 
@@ -138,5 +138,6 @@ one in `tests/conftest.py`.
 cd web/backend
 pip install -r requirements.txt pytest
 # optional extras listed in requirements-dev.txt
-SECRET_KEY=test-secret-key-that-is-long-enough-32ch PYTHONPATH=. python -m pytest -q
+# SECRET_KEY is pinned in tests/conftest.py; override via env if you want.
+PYTHONPATH=. python -m pytest -q
 ```

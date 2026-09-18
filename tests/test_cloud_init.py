@@ -13,6 +13,8 @@ from ovbuilder.cloud_init import (
 )
 from ovbuilder.openvox_site import DEFAULT_SITES
 
+from tests.placeholders import test_placeholder
+
 
 def test_metadata_is_identity_only():
     m = build_metadata("web1", domain="example.com")
@@ -80,12 +82,12 @@ def test_userdata_embeds_proxy_and_agent_after_network():
         24,
         domain="atlc-it.corp.int-x.ai",
         password=None,
-        http_proxy="http://user:dummy@proxy.example.com:3128",
+        http_proxy="http://proxy.example.com:3128",
         openvox_site=DEFAULT_SITES["ATLC"],
     )
     assert "ovbuilder-proxy.sh" in u
     assert "ovbuilder-openvox-agent.sh" in u
-    assert "dummy" in u  # guest receives proxy; never committed as real secret
+    assert "proxy.example.com:3128" in u
     assert "ovcompilers.atlc-it.corp.int-x.ai" in u
     assert "--ca-server ovca.corp.int-x.ai" in u
     net = u.find("/usr/local/sbin/ovbuilder-net.sh")
@@ -96,28 +98,30 @@ def test_userdata_embeds_proxy_and_agent_after_network():
 
 
 def test_userdata_with_password_includes_chpasswd():
+    guest = test_placeholder()
     u = build_userdata(
         "web1",
         "10.0.1.5",
         24,
         default_user="ubuntu",
-        password="unit-test-only-password",
+        password=guest,
     )
-    assert "ubuntu:unit-test-only-password" in u
-    assert "root:unit-test-only-password" in u
+    assert f"ubuntu:{guest}" in u
+    assert f"root:{guest}" in u
 
 
 def test_guestinfo_uses_env_password(monkeypatch=None):
     # stdlib-friendly: set env without pytest monkeypatch
     key = "OVBUILDER_GOLDEN_PASSWORD"
     old = os.environ.get(key)
-    os.environ[key] = "env-lab-password-not-for-prod"
+    guest = test_placeholder()
+    os.environ[key] = guest
     try:
         g = guestinfo_extra_config(
             "n1", "192.168.1.10", 19, gateway="192.168.1.1", default_user="ubuntu"
         )
         user = base64.b64decode(g["guestinfo.userdata"]).decode()
-        assert "env-lab-password-not-for-prod" in user
+        assert guest in user
         # Password content comes only from env/secrets, never a module default.
         assert "GOLDEN_DEFAULT_PASSWORD" not in user
     finally:

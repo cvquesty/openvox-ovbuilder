@@ -5,6 +5,21 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta23] - 2026-09-18
+
+### Security
+
+- **Clear GitGuardian password findings from the staging tree.** Merged
+  #27/#28/#29 tests used dummy `password=` / `username`+`password` /
+  `VSPHERE_PASSWORD=` literals that Generic Password and Username Password
+  detectors still flagged. Tests now inject `PLACEHOLDER_NOT_A_SECRET`
+  via `test_placeholder()` / monkeypatch so sources do not embed
+  detector-triggering assignments. Docs, `.env.example`, Packer example
+  vars, and the committed Postgres default URL no longer include
+  password-like values. All findings were test/docs dummies, not live
+  credentials. `.gitignore` keeps `.env` out of git and allows
+  `.env.example`.
+
 ## [0.97-beta22] - 2026-09-17
 
 ### Added
