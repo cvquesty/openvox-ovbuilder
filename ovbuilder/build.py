@@ -43,6 +43,7 @@ from . import vsphere
 from .cloud_init import guestinfo_extra_config
 from .goldens import (
     COMPUTE_TYPE_CLUSTER,
+    COMPUTE_TYPE_HOST,
     discover_goldens,
     goldens_from_config,
     resolve_os_image,
@@ -220,6 +221,54 @@ def _prompt_table_choice(
         return names[default_index]
 
 
+def _prompt_compute_placement(si, dc: str) -> Tuple[str, str]:
+    """
+    Pick a real ClusterComputeResource, or a standalone host if none exist.
+
+    Hosts are never listed as clusters. Terraform ``vsphere_compute_cluster``
+    rejects ESXi host FQDNs.
+    """
+    clusters = vsphere.list_clusters(si, dc)
+    if clusters:
+        return (
+            _prompt_table_choice(f"Clusters in {dc}", clusters),
+            COMPUTE_TYPE_CLUSTER,
+        )
+    hosts = vsphere.list_standalone_hosts(si, dc)
+    if hosts:
+        console.print(
+            f"[yellow]Datacenter {dc!r} has no vSphere compute cluster "
+            f"(ClusterComputeResource). Placing on a standalone ESXi host.[/yellow]"
+        )
+        return (
+            _prompt_table_choice(f"Standalone ESXi hosts in {dc}", hosts),
+            COMPUTE_TYPE_HOST,
+        )
+    console.print(
+        f"[red]No vSphere compute cluster (ClusterComputeResource) and no "
+        f"standalone ESXi host found in datacenter {dc!r}.[/red]\n"
+        "[dim]ovbuilder requires a DRS/HA cluster, or a standalone host "
+        "when the datacenter has no cluster.[/dim]"
+    )
+    raise typer.Exit(1)
+
+
+def _verify_clone_template(
+    si,
+    *,
+    template_name: str,
+    template_datacenter: str,
+    placement_datacenter: str,
+) -> None:
+    """Fail before Terraform if the Packer template is missing in the lookup DC."""
+    lookup_dc = (template_datacenter or placement_datacenter or "").strip()
+    try:
+        vsphere.require_template(si, template_name, lookup_dc)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
 def _resolve_golden_and_compute(
     cfg: OvbuilderConfig,
     *,
@@ -285,14 +334,19 @@ def _resolve_golden_and_compute(
                 template_datacenter = chosen.datacenter
         if cluster_name:
             try:
-                compute_type = (
-                    vsphere.classify_compute(
-                        si, datacenter or cfg.datacenter, cluster_name
-                    )
-                    or COMPUTE_TYPE_CLUSTER
+                compute_type = vsphere.classify_compute(
+                    si, datacenter or cfg.datacenter, cluster_name
                 )
-            except Exception:
-                compute_type = COMPUTE_TYPE_CLUSTER
+            except RuntimeError as exc:
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1) from exc
+        if template_name:
+            _verify_clone_template(
+                si,
+                template_name=template_name,
+                template_datacenter=template_datacenter,
+                placement_datacenter=datacenter or cfg.datacenter,
+            )
         return (
             template_name,
             guest_id,
@@ -519,15 +573,7 @@ def build(
             else Prompt.ask("Datacenter", default=cfg.datacenter)
         )
 
-        clusters = vsphere.list_clusters(si, dc)
-        cluster = (
-            _prompt_table_choice(f"Compute in {dc}", clusters)
-            if clusters
-            else Prompt.ask("Cluster or host", default=cfg.cluster)
-        )
-        compute_type = (
-            vsphere.classify_compute(si, dc, cluster) or COMPUTE_TYPE_CLUSTER
-        )
+        cluster, compute_type = _prompt_compute_placement(si, dc)
 
         dss = vsphere.list_datastores(si, dc)
         dscs = vsphere.list_datastore_clusters(si, dc)
@@ -633,6 +679,12 @@ def build(
             default_user = chosen.default_user
             template_datacenter = chosen.datacenter
             os_image = chosen.key
+            _verify_clone_template(
+                si,
+                template_name=template_name,
+                template_datacenter=template_datacenter,
+                placement_datacenter=dc,
+            )
             console.print(
                 f"[dim]Will clone template [bold]{template_name}[/bold] "
                 f"(login user: {default_user})[/dim]"

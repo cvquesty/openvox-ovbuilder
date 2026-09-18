@@ -95,6 +95,7 @@ export const inventory = {
   osImages: () => request<OsImage[]>('/inventory/os-images'),
   environments: () => request<Environment[]>('/inventory/environments'),
   clusters: () => request<string[]>('/inventory/clusters'),
+  hosts: () => request<string[]>('/inventory/hosts'),
   networks: () => request<string[]>('/inventory/networks'),
   datacenters: () => request<string[]>('/inventory/datacenters'),
   datastoreClusters: () => request<string[]>('/inventory/datastore-clusters'),

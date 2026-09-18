@@ -10,7 +10,9 @@ workstation users who only want `ovbuilder` can ignore this document.
 The Build form OS picker lists live `ovbuilder-*` templates from every
 datacenter (name + short label only). The backend resolves the template's
 source datacenter silently so SEA3 can clone goldens that live in PDXC.
-Compute pickers include standalone ESXi hosts as well as DRS clusters.
+`/api/inventory/clusters` lists only real `ClusterComputeResource` objects.
+Standalone ESXi hosts are `/api/inventory/hosts` and are offered only when
+the placement datacenter has no compute cluster.
 
 ## Roles
 
@@ -35,8 +37,9 @@ passes `--vm-datastore-cluster` to the CLI.
 
 ## vSphere credentials (required for live inventory)
 
-Live cluster / network / datacenter / datastore-cluster lists talk to vCenter
-through `ovbuilder.vsphere` (pyVmomi). There is no second client.
+Live cluster / host / network / datacenter / datastore-cluster lists talk to
+vCenter through `ovbuilder.vsphere` (pyVmomi). There is no second client.
+The clusters endpoint never returns standalone hosts.
 
 Resolve credentials in this order (`web/backend/app/vsphere_client.py`):
 

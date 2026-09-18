@@ -2,7 +2,7 @@
 
 OS images are live ``ovbuilder-*`` templates discovered across every
 datacenter (config goldens are the vCenter-down fallback). Environment →
-datastore-cluster mapping comes from ovbuilder config. Clusters, networks,
+datastore-cluster mapping comes from ovbuilder config. Clusters (ClusterComputeResource only), standalone hosts, networks,
 datacenters, and datastore clusters are listed live via ``ovbuilder.vsphere``.
 
 Live endpoints return HTTP 502 with a clear message when vCenter is
@@ -156,7 +156,14 @@ async def datacenters(_user: UserOut = Depends(require_builder)) -> List[str]:
 
 @router.get("/clusters")
 async def clusters(_user: UserOut = Depends(require_builder)) -> List[str]:
+    """Real vSphere compute clusters only (never standalone ESXi hosts)."""
     return _list_live(vsphere.list_clusters)
+
+
+@router.get("/hosts")
+async def hosts(_user: UserOut = Depends(require_builder)) -> List[str]:
+    """Standalone ESXi hosts (not members of a ClusterComputeResource)."""
+    return _list_live(vsphere.list_standalone_hosts)
 
 
 @router.get("/networks")

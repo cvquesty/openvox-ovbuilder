@@ -93,10 +93,11 @@ export function BuildFormPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [osRes, envRes, clRes, netRes] = await Promise.allSettled([
+      const [osRes, envRes, clRes, hostRes, netRes] = await Promise.allSettled([
         inventory.osImages(),
         inventory.environments(),
         inventory.clusters(),
+        inventory.hosts(),
         inventory.networks(),
       ]);
       if (cancelled) return;
@@ -122,14 +123,23 @@ export function BuildFormPage() {
         setError(envRes.reason instanceof Error ? envRes.reason.message : 'Failed to load environments');
       }
 
-      if (clRes.status === 'fulfilled') {
-        const names = clRes.value;
+      if (clRes.status === 'fulfilled' || hostRes.status === 'fulfilled') {
+        const clusterNames = clRes.status === 'fulfilled' ? clRes.value : [];
+        const hostNames = hostRes.status === 'fulfilled' ? hostRes.value : [];
+        // Hosts are never labeled as clusters. Use hosts only when no cluster exists.
+        const names = clusterNames.length ? clusterNames : hostNames;
         setClusters(names);
         if (names.length && !form.values.cluster) {
           const envDefault = (envRes.status === 'fulfilled'
             ? envRes.value.find((e) => e.key === form.values.environment)?.cluster
             : '') || '';
           form.setFieldValue('cluster', names.includes(envDefault) ? envDefault : names[0]);
+        }
+        if (clRes.status === 'rejected') {
+          liveErrors.push(clRes.reason instanceof Error ? clRes.reason.message : 'clusters unavailable');
+        }
+        if (hostRes.status === 'rejected' && !clusterNames.length) {
+          liveErrors.push(hostRes.reason instanceof Error ? hostRes.reason.message : 'hosts unavailable');
         }
       } else {
         liveErrors.push(clRes.reason instanceof Error ? clRes.reason.message : 'clusters unavailable');

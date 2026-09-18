@@ -5,6 +5,30 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta32] - 2026-09-18
+
+### Fixed
+
+- **Inventory clusters are real `ClusterComputeResource` only.** `list_clusters`
+  no longer treats standalone ESXi hosts (`ComputeResource` / host FQDNs such
+  as `esx1.sea3.office.twttr.net`) as clusters. Terraform
+  `data.vsphere_compute_cluster` rejected those names with `cluster '…' not
+  found`. The CLI cluster picker and `GET /api/inventory/clusters` share that
+  filter. Nested hostFolder folders are walked.
+- **Standalone-host DCs keep a dedicated path.** When a datacenter has no
+  compute cluster, the CLI lists standalone ESXi hosts (not as clusters) and
+  sets `compute_type=host`. If neither a cluster nor a host is visible,
+  ovbuilder exits with a clear error instead of sending a guessed name to
+  Terraform. `classify_compute` no longer defaults unknown names to
+  `cluster` (that skipped the host data source).
+- **Packer template is verified before Terraform.** After the operator
+  selects an `ovbuilder-*` golden, ovbuilder checks that the VM exists as a
+  template in the datacenter Terraform will query (`template_datacenter`,
+  else the placement DC). A missing golden is an ovbuilder error with the
+  DC name (and other DCs if found), not
+  `vm 'ovbuilder-ubuntu-24.04' not found` from
+  `data.vsphere_virtual_machine`.
+
 ## [0.97-beta31] - 2026-09-18
 
 ### Added

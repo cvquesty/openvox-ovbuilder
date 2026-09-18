@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ovbuilder import vsphere
 
 
@@ -59,7 +61,9 @@ def test_list_golden_templates_skips_inaccessible_vms():
     assert [r["name"] for r in rows] == ["ovbuilder-almalinux-10"]
 
 
-def test_classify_compute_defaults_unknown_to_cluster():
+def test_classify_compute_unknown_or_empty_raises():
     with patch.object(vsphere, "_find_datacenter", return_value=None):
-        assert vsphere.classify_compute(object(), "SEA3", "esx1") == "cluster"
-    assert vsphere.classify_compute(object(), "SEA3", "") == "cluster"
+        with pytest.raises(RuntimeError, match="not a vSphere compute cluster"):
+            vsphere.classify_compute(object(), "SEA3 - Bellevue", "esx1")
+    with pytest.raises(RuntimeError, match="required"):
+        vsphere.classify_compute(object(), "SEA3 - Bellevue", "")
