@@ -49,7 +49,12 @@ from .network import (
     parse_cidr_prefix,
     prefix_to_netmask,
 )
-from .secrets import get_golden_password, golden_password_setup_help, secrets_env_path
+from .secrets import (
+    get_golden_password,
+    get_vsphere_password,
+    golden_password_setup_help,
+    secrets_env_path,
+)
 from .ssh import run_post_install_steps
 from .terraform import run_terraform_apply
 
@@ -341,6 +346,9 @@ def build(
     if _is_optioninfo(datacenter):
         datacenter = None
 
+    # Prefer env / secrets.env over ``--vsphere-password`` on argv (ps-visible).
+    vsphere_password = get_vsphere_password(vsphere_password)
+
     # --- Config + terraform path --------------------------------------------
     cfg: OvbuilderConfig = (
         ctx.obj.get("config") if ctx.obj else get_config_manager().load_config()
@@ -384,7 +392,8 @@ def build(
             "vSphere server FQDN", default=cfg.vsphere_server
         )
         vsphere_user = Prompt.ask("vSphere username")
-        vsphere_password = Prompt.ask("vSphere password", password=True)
+        if not vsphere_password:
+            vsphere_password = Prompt.ask("vSphere password", password=True)
 
         console.print(
             f"[dim]Connecting to {vsphere_server} to discover inventory...[/dim]"

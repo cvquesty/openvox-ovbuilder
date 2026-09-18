@@ -31,11 +31,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
           pip install -r web/backend/requirements.txt
-          pip install pytest httpx
-      - run: |
-          cd web/backend && python -c "from app.main import app; print(app.title)"
-      - run: |
-          PYTHONPATH=web/backend pytest -q web/backend/tests
+          pip install pytest httpx aiosqlite
+      - env:
+          SECRET_KEY: test-secret-key-that-is-long-enough-32ch
+        run: |
+          cd web/backend && PYTHONPATH=. python -c "from app.main import app; print(app.title)"
+      - env:
+          SECRET_KEY: test-secret-key-that-is-long-enough-32ch
+        run: |
+          PYTHONPATH=web/backend python -m pytest -q web/backend/tests
 
   web-frontend:
     runs-on: ubuntu-latest
