@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ovbuilder"
-version = "0.97-beta44"
+version = "0.97-beta45"
 description = "ovbuilder — OpenVox command-line tool for building VMware VMs from ISO"
 readme = "README.md"
 license = "Apache-2.0"
