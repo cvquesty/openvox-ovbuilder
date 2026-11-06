@@ -14,7 +14,7 @@ import secrets
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -149,10 +149,44 @@ class Settings(BaseSettings):
     # After a failed vCenter call, skip new attempts for this long.
     inventory_error_backoff_seconds: int = 15
 
-    # --- Notifications (optional webhook; Slack-compatible JSON) -----------
-    notify_webhook_url: str = ""
+    # --- Notifications (all channels off until configured) ------------------
+    # Admin Settings (runtime_settings.json) override these per field.
+    # Secrets: .env / env only (OVBUILDER_* aliases like the vSphere password).
+    notify_webhook_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("notify_webhook_url", "ovbuilder_notify_webhook_url"),
+    )
+    # "slack" posts {"text": ...}; "json" posts the full event plus "text".
+    notify_webhook_format: str = "slack"
     notify_on_success: bool = True
     notify_on_failure: bool = True
+    notify_on_cancelled: bool = True
+    # Prefix for $job_url in templates, e.g. https://builder.example.com
+    public_base_url: str = ""
+    # Empty = built-in default templates. string.Template syntax ($hostname).
+    notify_text_template: str = ""
+    notify_email_subject_template: str = ""
+    notify_email_body_template: str = ""
+
+    # Email requires NOTIFY_EMAIL_ENABLED=true and SMTP_HOST.
+    notify_email_enabled: bool = False
+    # Send to the requester's directory email (subject to their preferences).
+    notify_email_owner: bool = True
+    # Comma-separated extra recipients (e.g. an ops list); gets every event
+    # allowed by the global on_* toggles.
+    notify_email_to: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("smtp_password", "ovbuilder_smtp_password"),
+    )
+    smtp_starttls: bool = True
+    smtp_ssl: bool = False
+    smtp_from: str = ""
+    smtp_timeout_seconds: float = 10.0
+    notify_webhook_timeout_seconds: float = 8.0
 
 
 @lru_cache

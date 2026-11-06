@@ -5,6 +5,37 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta40] - 2026-11-06
+
+### Added
+
+- **Build notifications (#11).** When a build succeeds, fails, or is
+  cancelled, the web worker can notify through:
+  - a webhook in Slack format (`{"text"}`) or generic JSON format (event plus
+    job fields);
+  - SMTP email (STARTTLS or implicit TLS) to the requester and/or a fixed
+    recipient list.
+
+  Every channel is off until configured in `.env` or in admin
+  **Configuration → Notifications**. A value saved in the UI wins over
+  `.env`.
+- **Per-user preferences.** The new **My notifications** page and
+  `GET|PUT /api/auth/me/notifications` let each user turn email for their
+  own builds on or off per event. Stored in the new
+  `user_notification_prefs` table (Alembic `0003`).
+- **Configurable templates** for webhook text and for email subject and
+  body (`$hostname`, `$status`, `$duration`, `$job_url`, …), plus
+  `PUBLIC_BASE_URL` for job links.
+
+### Security
+
+- The SMTP password and webhook URL are write-only secrets and are never
+  returned by the API. User fields are escaped in Slack text (no
+  `<!channel>` injection), email headers are stripped of CR/LF, and the
+  webhook must use http or https.
+- Notification failures are contained: a broken webhook, SMTP server, or
+  template is logged and never changes a build's outcome.
+
 ## [0.97-beta39] - 2026-11-06
 
 ### Fixed

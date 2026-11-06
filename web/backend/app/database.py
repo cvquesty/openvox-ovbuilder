@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Sequence
 
-from sqlalchemy import JSON, DateTime, String, Text, create_engine, func, select
+from sqlalchemy import JSON, Boolean, DateTime, String, Text, create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -27,6 +27,8 @@ from .models import (
     BuildJob,
     BuildRequest,
     BuildStatus,
+    NotificationPrefs,
+    NotificationPrefsUpdate,
     Role,
     UserAdminOut,
     coerce_role,
@@ -76,6 +78,19 @@ class UserRow(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationPrefRow(Base):
+    """Per-user build notification preferences (absent row = defaults)."""
+
+    __tablename__ = "user_notification_prefs"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    on_success: Mapped[bool] = mapped_column(Boolean, default=True)
+    on_failure: Mapped[bool] = mapped_column(Boolean, default=True)
+    on_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -515,3 +530,59 @@ async def list_users() -> list[UserAdminOut]:
         stmt = select(UserRow).order_by(UserRow.username.asc())
         result = await session.execute(stmt)
         return [_to_user(r) for r in result.scalars().all()]
+
+
+# ---------------------------------------------------------------------------
+# Notification preferences
+# ---------------------------------------------------------------------------
+
+_PREF_FIELDS = ("email_enabled", "on_success", "on_failure", "on_cancelled")
+
+
+def _to_prefs(row: Optional[NotificationPrefRow]) -> NotificationPrefs:
+    if row is None:
+        return NotificationPrefs()
+    return NotificationPrefs(**{f: bool(getattr(row, f)) for f in _PREF_FIELDS})
+
+
+async def get_notification_prefs(username: str) -> NotificationPrefs:
+    factory = _async_session()
+    async with factory() as session:
+        return _to_prefs(await session.get(NotificationPrefRow, username))
+
+
+async def set_notification_prefs(
+    username: str, patch: NotificationPrefsUpdate
+) -> NotificationPrefs:
+    factory = _async_session()
+    async with factory() as session:
+        row = await session.get(NotificationPrefRow, username)
+        if row is None:
+            defaults = NotificationPrefs()
+            row = NotificationPrefRow(
+                username=username,
+                **{f: getattr(defaults, f) for f in _PREF_FIELDS},
+                updated_at=_utcnow(),
+            )
+            session.add(row)
+        for key, value in patch.model_dump(exclude_unset=True).items():
+            if value is not None:
+                setattr(row, key, bool(value))
+        row.updated_at = _utcnow()
+        await session.commit()
+        await session.refresh(row)
+        return _to_prefs(row)
+
+
+def get_notification_prefs_sync(username: str) -> NotificationPrefs:
+    factory = _sync_session()
+    with factory() as session:
+        return _to_prefs(session.get(NotificationPrefRow, username))
+
+
+def get_user_email_sync(username: str) -> Optional[str]:
+    """Directory email captured at last login (None if unknown)."""
+    factory = _sync_session()
+    with factory() as session:
+        row = session.get(UserRow, username)
+        return (row.email or None) if row else None
