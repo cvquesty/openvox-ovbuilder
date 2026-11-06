@@ -110,8 +110,8 @@ Group revocation (for example removing someone from `ovbuilder-admins`) is
 therefore visible within about one minute, not at token expiry (default 8h).
 Set `ROLE_CACHE_TTL_SECONDS=0` to re-check LDAP on every request.
 
-Postgres applies `0002_users_role_overrides` via `alembic upgrade head`
-(install-web.sh and API startup). sqlite tests use `create_all`.
+`0002_users_role_overrides` creates the `users` table via
+`alembic upgrade head` (install-web.sh and API startup).
 
 ### Local role overrides
 
@@ -363,34 +363,84 @@ Submitted `request` JSON **includes** `vsphere_password` so the worker can load
 the job by id. `GET`/`POST` job responses still use `BuildJobPublic` and omit
 the field. Redis/Celery task args are `job_id` only.
 
-Postgres schema is managed with Alembic (see below). sqlite unit tests call
-`create_all` so they do not need a migration runner; `init_db()` does the same
-when `DATABASE_URL` is sqlite.
+The schema is managed only by Alembic (see below), on Postgres and on
+file-backed sqlite alike; the unit tests migrate their sqlite database the
+same way. Only in-memory sqlite falls back to `create_all`.
 
 ### Migrations
 
-Schema is managed with Alembic (`web/backend/alembic/`).
-`install-web.sh` runs `alembic upgrade head` when `alembic.ini` is present.
-Re-run after changing `.env` if Postgres was down:
+Schema lives in `web/backend/alembic/versions/`. Two things run
+`alembic upgrade head`:
+
+1. `install-web.sh`, on every install or upgrade (unless `--skip-migrate`).
+2. API startup (`init_db()` in the FastAPI lifespan). This is a no-op when
+   the database is already at head, so a missed install-time migrate is not
+   fatal.
+
+On Postgres both take a session advisory lock first, so an installer and a
+starting API never migrate at the same time. Celery workers never migrate.
+
+Run it by hand after restoring a backup, or if Postgres was down during an
+install:
 
 ```bash
 cd /opt/ovbuilder/web/backend   # or web/backend in a checkout
 # Uses DATABASE_URL from the environment or .env
-/opt/ovbuilder/venv/bin/alembic upgrade head
-/opt/ovbuilder/venv/bin/alembic current
+sudo -u ovbuilder /opt/ovbuilder/venv/bin/alembic upgrade head
+sudo -u ovbuilder /opt/ovbuilder/venv/bin/alembic current   # expect "(head)"
 ```
 
-Add a new revision after changing `JobRow` / `Base.metadata`:
+#### Databases created before Alembic
+
+Hosts that ran 0.97-beta19 created `build_jobs` with SQLAlchemy
+`create_all`, so they have tables but no `alembic_version`. `alembic upgrade
+head` adopts them automatically. It checks that the existing tables carry
+every column of the matching baseline revision, stamps that revision (`0001`
+for `build_jobs` only, `0002` if `users` exists too), then applies the
+rest. The log shows `no alembic_version; stamping 0001`.
+
+If the tables do not match a baseline (columns missing, a later table without
+its predecessors, or a newer model's table already present), the upgrade
+stops with `UnrecognizedSchemaError` and changes nothing. Fix the schema by
+hand, then record the revision it matches:
 
 ```bash
-cd web/backend
-alembic revision --autogenerate -m "describe the change"
-# Review the generated file, then:
-alembic upgrade head
+sudo -u ovbuilder /opt/ovbuilder/venv/bin/alembic stamp 0002
+sudo -u ovbuilder /opt/ovbuilder/venv/bin/alembic upgrade head
 ```
 
+#### Adding a migration
+
+1. Change the model in `web/backend/app/database.py` (`Base.metadata`).
+2. Generate a revision against a database that is at head:
+
+   ```bash
+   cd web/backend
+   DATABASE_URL=sqlite:///./dev.db alembic upgrade head
+   DATABASE_URL=sqlite:///./dev.db alembic revision --autogenerate -m "add foo"
+   ```
+
+3. Rename the file to the next number (`0003_add_foo.py`), set
+   `revision = "0003"`, and set `down_revision` to the **current head**
+   (`alembic heads`). Review the generated operations and write a real
+   `downgrade()`.
+4. `PYTHONPATH=web/backend python -m pytest web/backend/tests/test_migrations.py`.
+   It upgrades and downgrades on sqlite (and on Postgres when
+   `OVBUILDER_TEST_POSTGRES_URL` points at a throwaway database). It fails
+   if the models and migrations drift apart, or if there is more than one
+   head.
+
+Two branches that each add a revision off the same parent produce two
+heads. Whichever merges second rebases and points its `down_revision` at
+the other's revision (renumbering if needed). Do not ship `alembic merge`
+revisions for this.
+
+Never edit a revision that has shipped. Do not add new revisions to
+`UNVERSIONED_BASELINE` in `app/migrations.py`; it describes only schemas
+that existed before Alembic.
+
 Revisions: `0001_initial_build_jobs` (`build_jobs`) and
-`0002_users_role_overrides` (`users` — LDAP role cache + local overrides).
+`0002_users_role_overrides` (`users`: LDAP role cache and local overrides).
 
 ## Terraform state
 

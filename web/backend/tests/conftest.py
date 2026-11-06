@@ -1,7 +1,8 @@
 """Shared fixtures for web-backend tests.
 
 SECRET_KEY is pinned before app.config is imported (fail-fast unless DEBUG).
-The store uses sqlite via configure_database() so tests do not need
+The store uses sqlite via configure_database() and real Alembic migrations
+(the same schema path as production), so tests do not need
 Postgres, Redis, a live directory, vCenter, or a live ovbuilder CLI.
 Inventory tests mock the vSphere session.
 
@@ -53,7 +54,7 @@ def job_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'jobs.db'}")
     get_settings.cache_clear()
     db.configure_database()
-    db.Base.metadata.create_all(db.get_sync_engine())
+    db.run_alembic_upgrade()
     yield
     db.dispose_database()
     get_settings.cache_clear()
