@@ -5,6 +5,49 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta42] - 2026-11-06
+
+### Added
+
+- **One-command platform install (#7).** `sudo ./install.sh --web [--start]`
+  installs the CLI, then runs `web/install-web.sh --with-deps`: Postgres,
+  Redis (Valkey on EL10), Nginx, and Node from `apt`/`dnf`, enabled and
+  started; the `ovbuilder-web` (API) and `ovbuilder-worker` (Celery) systemd
+  units; the nginx site. Options after `--` pass through
+  (`--skip-postgres`, `--skip-redis`, `--skip-frontend`, …). Re-running is
+  the upgrade path.
+- **`install-web.sh --with-deps`** creates the Postgres role and database
+  from `DATABASE_URL`, generates the role password once into the `0600`
+  `.env` (SQL goes over stdin, never argv), and manages a loopback
+  password-auth block at the top of `pg_hba.conf` (EL `initdb` defaults to
+  `ident`). It runs `postgresql-setup --initdb` on EL, enables the
+  `nodejs:22`/`nodejs:20` module stream on EL9, and requires Node ^20.19 or
+  >=22.12 for Vite 8 (it stops with instructions instead of piping a
+  remote setup script). It also disables the stock Debian/Ubuntu nginx
+  default site, applies SELinux `httpd_can_network_connect` and the
+  `httpd_sys_content_t` label on `frontend/dist`, and opens `http` in
+  firewalld.
+- **Docs:** `docs/WEB.md` covers the single-command bare-metal path, the
+  manual two-step path, and an optional Postgres/Redis-in-containers path.
+
+### Fixed
+
+- **Frontend build on the web box.** `vite.config.ts` reads `../../VERSION`.
+  `install-web.sh` now copies `VERSION` to the install root, so `npm run build`
+  no longer fails with `ENOENT /opt/ovbuilder/VERSION`.
+- **`install.sh` recovers a half-created venv.** A venv without `pip` (for
+  example after a failed create because `python3-venv` was missing) is
+  recreated instead of reused. `--web` installs `python3-venv`/`rsync`
+  first.
+- **`install.sh --uninstall`** also stops and removes the web systemd units
+  and nginx site before deleting `/opt/ovbuilder`. It asks first when a web
+  `.env` exists, unless `-y`. The Postgres data is kept. `-y` was previously
+  a no-op.
+- **`install-web.sh --start` restarts** the units, so a re-run picks up new
+  code. Alembic runs as the service user via `runuser` (with a `sudo`
+  fallback). The installer warns when `terraform` is not on `PATH`.
+- `install.sh` and `web/install-web.sh` are shellcheck-clean.
+
 ## [0.97-beta41] - 2026-11-06
 
 ### Fixed

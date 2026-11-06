@@ -111,13 +111,13 @@ Add the venv `Scripts` folder to your user PATH, or activate the venv each sessi
 
 ### Dedicated web box (optional)
 
-`./install.sh` installs the **CLI only**. The self-service SPA, FastAPI, and
-Celery worker are a separate bare-metal path on a Linux host with Postgres,
-Redis, and Nginx:
+Plain `./install.sh` installs the **CLI only**. On a dedicated Linux host
+(Ubuntu/Debian or RHEL family, systemd), one command installs the whole
+platform: CLI, Postgres, Redis, Nginx, Node, the FastAPI API, the Celery
+worker, and their systemd units. It is safe to re-run.
 
 ```bash
-sudo ./install.sh
-sudo ./web/install-web.sh
+sudo ./install.sh --web --start
 ```
 
 Prerequisites, `.env`, systemd, nginx, and health checks: **[docs/WEB.md](docs/WEB.md)**.
@@ -410,7 +410,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta41` |
+| ovbuilder CLI | `0.97-beta42` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
@@ -426,7 +426,7 @@ still have a root `data.vsphere_compute_cluster` in `providers.tf` and a
 picker titled “Clusters in SEA3…”.
 
 ```bash
-ovbuilder --version    # need 0.97-beta31+ (this tree: 0.97-beta41)
+ovbuilder --version    # need 0.97-beta31+ (this tree: 0.97-beta42)
 sudo -H ./install.sh   # or ./install.sh --user
 hash -r && ovbuilder --version
 ```
