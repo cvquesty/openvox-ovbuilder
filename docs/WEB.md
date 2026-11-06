@@ -58,6 +58,28 @@ Resolve credentials in this order (`web/backend/app/vsphere_client.py`):
    - `VSPHERE_IGNORE_SSL` (lab default `true`)
 3. CLI `config.yaml` for server / datacenter / SSL when a web field is empty
 
+`VSPHERE_CONNECT_TIMEOUT_SECONDS` (default `15`) bounds each vCenter socket
+operation so an unreachable vCenter fails fast.
+
+### Inventory caching
+
+Each API process caches live inventory lists per endpoint and per vCenter
+identity (server, user, datacenter; never the password). Concurrent requests
+for the same list share one vCenter call.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `INVENTORY_CACHE_TTL_SECONDS` | `300` | Serve cached lists without calling vCenter. `0` = always live. |
+| `INVENTORY_STALE_TTL_SECONDS` | `3600` | While vCenter is unreachable, keep serving the last good list this long. `0` = never stale. |
+| `INVENTORY_ERROR_BACKOFF_SECONDS` | `15` | After a failed vCenter call, do not retry for this long. |
+
+Responses carry `X-Inventory-Source` (`live`, `cache`, `stale`, or
+`fallback` for config OS images) and `X-Inventory-Age` in seconds. Add
+`?refresh=true` to skip the fresh cache (for example right after adding a
+port group). With nothing usable cached, a vCenter failure is HTTP 502 with
+the error message and, during backoff, `Retry-After`. The endpoints never
+invent placeholder names.
+
 OS images come from live vCenter (`ovbuilder-*` templates across all
 datacenters). If credentials are missing or vCenter is unreachable, the
 OS picker falls back to configured `ovbuilder-*` goldens so the form still
@@ -333,13 +355,16 @@ workers do not share a state file. Do not run bare `terraform apply` inside
 - `PUT /api/auth/users/{username}` — admin: set or clear `role_override`
 - `POST /api/builds` — queue a build
 - `POST /api/builds/{id}/cancel` — stop a queued/running job
-- `GET /api/inventory/os-images` — live `ovbuilder-*` templates (name + label; source DC is not returned). Config goldens if vCenter is down.
+- `GET /api/inventory/os-images` — live `ovbuilder-*` templates (name + label; source DC is not returned). Config goldens if vCenter is down and nothing is cached.
 - `GET /api/inventory/environments` — env → datastore-cluster mapping
-- `GET /api/inventory/clusters` — live compute clusters (502 if vSphere down)
-- `GET /api/inventory/networks` — live port groups (502 if vSphere down)
-- `GET /api/inventory/datacenters` — live datacenters (502 if vSphere down)
+- `GET /api/inventory/clusters` — live compute clusters
+- `GET /api/inventory/networks` — live port groups
+- `GET /api/inventory/datacenters` — live datacenters
 - `GET /api/inventory/datastore-clusters` — live Storage DRS names
 - `GET /api/inventory/datastores` — live datastores (not offered as a form picker)
+
+Live inventory endpoints (everything above except `environments`) are cached;
+see [Inventory caching](#inventory-caching).
 - `GET /api/vms` — live VM list
 - `POST /api/vms/{name}/power-on|power-off|reboot|snapshot`
 - `DELETE /api/vms/{name}` — admin only

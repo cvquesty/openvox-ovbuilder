@@ -5,6 +5,34 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta37] - 2026-11-06
+
+### Added
+
+- **Live inventory cache (#6).** `/api/inventory/*` lists (clusters, hosts,
+  networks, datacenters, datastore clusters, datastores, `ovbuilder-*` OS
+  images) are cached per API process, keyed by endpoint and vCenter
+  identity (server, user, datacenter; never the password). Concurrent
+  requests share one vCenter call. Tunables: `INVENTORY_CACHE_TTL_SECONDS`
+  (300), `INVENTORY_STALE_TTL_SECONDS` (3600),
+  `INVENTORY_ERROR_BACKOFF_SECONDS` (15). `?refresh=true` skips the fresh
+  cache. Responses carry `X-Inventory-Source` (`live` / `cache` / `stale` /
+  `fallback`) and `X-Inventory-Age`.
+
+### Changed
+
+- **Graceful degradation when vCenter is unreachable.** The last good list is
+  served as `stale` instead of a 502. With nothing cached, the 502 now
+  includes `Retry-After`, and repeat failures back off instead of
+  reconnecting on every request. OS images prefer a stale live list over
+  config goldens.
+- **Inventory endpoints run in the threadpool** (sync handlers) so blocking
+  pyVmomi calls no longer stall the API event loop.
+- **`ovbuilder.vsphere.connect(timeout=…)`** passes `httpConnectionTimeout`
+  to pyVmomi. The web app sets it from `VSPHERE_CONNECT_TIMEOUT_SECONDS`
+  (15). The CLI default is unchanged (no timeout).
+- **README version badge** now matches `VERSION` (it was left at beta33).
+
 ## [0.97-beta34] - 2026-11-06
 
 ### Security

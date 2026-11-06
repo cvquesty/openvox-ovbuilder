@@ -136,6 +136,18 @@ class Settings(BaseSettings):
     vsphere_password: str = ""
     vsphere_datacenter: str = ""
     vsphere_ignore_ssl: bool = True
+    # Socket timeout for vCenter connections opened by the web app, so an
+    # unreachable vCenter fails fast instead of tying up a request thread.
+    vsphere_connect_timeout_seconds: int = 15
+
+    # --- Live inventory cache (per process) ---------------------------------
+    # Fresh window for cached inventory lists. 0 = always query vCenter.
+    inventory_cache_ttl_seconds: int = 300
+    # How long the last good list may be served (flagged stale) while
+    # vCenter is unreachable. 0 = never serve stale data.
+    inventory_stale_ttl_seconds: int = 3600
+    # After a failed vCenter call, skip new attempts for this long.
+    inventory_error_backoff_seconds: int = 15
 
     # --- Notifications (optional webhook; Slack-compatible JSON) -----------
     notify_webhook_url: str = ""

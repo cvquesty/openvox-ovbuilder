@@ -43,6 +43,7 @@ def connect(
     pwd: str,
     port: int = 443,
     ignore_ssl: bool = True,
+    timeout: Optional[float] = None,
 ):
     """
     Open a pyVmomi session to vCenter / ESXi.
@@ -57,6 +58,9 @@ def connect(
         HTTPS port (default 443).
     ignore_ssl : bool
         If True, skip certificate hostname/CA checks (lab convenience).
+    timeout : float, optional
+        Socket timeout in seconds for the vCenter HTTPS connection. None
+        keeps the pyVmomi default (no timeout).
 
     Returns
     -------
@@ -80,12 +84,16 @@ def connect(
 
     try:
         # SmartConnect negotiates SOAP + session cookie for subsequent API calls.
+        kwargs = {}
+        if timeout:
+            kwargs["httpConnectionTimeout"] = timeout
         si = SmartConnect(
             host=server,
             user=user,
             pwd=pwd,
             port=port,
             sslContext=context,
+            **kwargs,
         )
         return si
     except Exception as exc:

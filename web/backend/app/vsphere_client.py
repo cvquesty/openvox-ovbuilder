@@ -55,18 +55,31 @@ def configured_datacenter(settings: Optional[Settings] = None) -> str:
     return (_credentials(settings)[3] or "").strip()
 
 
+def session_identity(settings: Optional[Settings] = None) -> Tuple[str, str, str]:
+    """(server, user, datacenter) for cache keys. Never includes the password."""
+    server, user, _password, datacenter, _ignore_ssl = _credentials(settings)
+    return (server or "", user or "", (datacenter or "").strip())
+
+
 @contextmanager
 def vsphere_session(settings: Optional[Settings] = None) -> Iterator[Tuple[object, str]]:
     """Yield (service_instance, datacenter_name). Disconnects on exit."""
     from ovbuilder import vsphere
 
+    settings = settings or get_settings()
     server, user, password, datacenter, ignore_ssl = _credentials(settings)
     if not server or not user or not password:
         raise RuntimeError(
             "vSphere credentials are not configured. "
             "Set VSPHERE_SERVER, VSPHERE_USER, and VSPHERE_PASSWORD."
         )
-    si = vsphere.connect(server, user, password, ignore_ssl=ignore_ssl)
+    si = vsphere.connect(
+        server,
+        user,
+        password,
+        ignore_ssl=ignore_ssl,
+        timeout=settings.vsphere_connect_timeout_seconds or None,
+    )
     try:
         yield si, datacenter
     finally:
