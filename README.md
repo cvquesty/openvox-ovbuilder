@@ -262,12 +262,12 @@ ovbuilder config
 |-------|------|
 | `ovbuilder` CLI | Interview, discovery, Terraform driver, optional SSH |
 | Bundled Terraform (`terraform/modules/vm`) | Clone golden **or** empty disk + ISO |
-| Per-VM state | Each hostname has its own Terraform state file |
+| Per-VM state | Each hostname has its own Terraform state, module copy, and lock |
 | cloud-init guestinfo | Hostname + static IP on golden clones |
 | DNF groups | Extra EL package groups after network is up |
 | SSH post-steps | Optional agent install; ISO network + DNF groups |
 
-State lives under the **data directory** (see [Configuration](#configuration)), not in the shared Terraform module folder. Building `ovca3` does not rename `ovca2`.
+State lives under the **data directory** (see [Configuration](#configuration)), not in the shared Terraform module folder. Building `ovca3` does not rename `ovca2`. Parallel builds each run in a private copy of the module, and two builds of the same hostname cannot run at once. Optional remote backends (S3, Azure, GCS, Consul) are covered in [docs/TERRAFORM_STATE.md](docs/TERRAFORM_STATE.md).
 
 ## Configuration
 
@@ -291,6 +291,9 @@ Create the directory if it does not exist. vSphere passwords are **not** written
 
 ```yaml
 terraform_dir: ""   # blank = bundled or /opt/ovbuilder/terraform
+# State backend: local (default), s3, azurerm, gcs, consul.
+# See docs/TERRAFORM_STATE.md for terraform_backend_config.
+terraform_backend: local
 vsphere_server: vcenter.example.com
 vm_datastore: vsanDatastore
 # Prefer a Storage DRS cluster (YAVIN-PROD, HOTH_DEV, …) so vCenter
@@ -478,7 +481,7 @@ ovbuilder disconnects CD/DVD after clone hygiene and after ISO installs. If you 
 
 ### Terraform “state lock” or wrong VM renamed
 
-Each hostname has isolated state under the data directory `tfstate/<hostname>/`. Do not point two builds at the same hostname unless you intend to update that VM.
+Each hostname has isolated state under the data directory `tfstate/<hostname>/`. Do not point two builds at the same hostname unless you intend to update that VM. A second build of a hostname that is still building fails with `Another build is already running`. Do not run bare `terraform apply` in the module directory; see [docs/TERRAFORM_STATE.md](docs/TERRAFORM_STATE.md).
 
 ## Documentation map
 
@@ -487,6 +490,7 @@ Each hostname has isolated state under the data directory `tfstate/<hostname>/`.
 | [README.md](README.md) (this file) | Everyone — install, use, configure |
 | [docs/WEB.md](docs/WEB.md) | Dedicated-box web install (nginx + systemd) |
 | [docs/SECRETS.md](docs/SECRETS.md) | Everyone — passwords and credentials |
+| [docs/TERRAFORM_STATE.md](docs/TERRAFORM_STATE.md) | Operators — state layout, locking, remote backends |
 | [packer/README.md](packer/README.md) | People who build golden templates |
 | [terraform/modules/vm/README.md](terraform/modules/vm/README.md) | People calling Terraform directly |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |

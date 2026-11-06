@@ -20,16 +20,38 @@ var-file next to that state (mode 0600) because CLI ``-var=map`` quoting
 is fragile for base64 guestinfo payloads.
 
 Legacy shared state in the module directory is migrated once on apply.
+
+=============================================================================
+PARALLEL BUILDS
+=============================================================================
+Every apply runs in a private copy of the root module
+(``tfstate/<hostname>/module``) so ``terraform init`` never rewrites a lock
+file or backend override that another job is using. An exclusive per-hostname
+file lock (``tfstate/<hostname>/.ovbuilder.lock``) is held for init + apply:
+a second build of the same hostname fails fast instead of racing on the var
+file and state. Terraform's own state lock (``-lock-timeout``) still guards
+against anything else touching that state.
+
+Optional remote backends (``terraform_backend`` = s3 / azurerm / gcs /
+consul) store each VM under ``<terraform_state_prefix>/<hostname>``.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Iterator, Optional
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
+    import msvcrt
 
 from rich.console import Console
 
@@ -65,6 +87,132 @@ def state_dir_for_vm(vm_name: str, data_dir: Optional[Path] = None) -> Path:
 def state_file_for_vm(vm_name: str, data_dir: Optional[Path] = None) -> Path:
     """Path to terraform.tfstate for this hostname."""
     return state_dir_for_vm(vm_name, data_dir=data_dir) / "terraform.tfstate"
+
+
+class StateLockedError(RuntimeError):
+    """Another ovbuilder process is already building this hostname."""
+
+
+@contextlib.contextmanager
+def hostname_lock(state_dir: Path) -> Iterator[None]:
+    """
+    Hold an exclusive, non-blocking lock on ``state_dir`` for one build.
+
+    The OS releases it if the process dies, so a crashed build never leaves
+    a stale lock behind.
+    """
+    lock_path = state_dir / ".ovbuilder.lock"
+    fh = open(lock_path, "a+")
+    try:
+        try:
+            if fcntl is not None:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            raise StateLockedError(
+                f"Another build is already running for {state_dir.name} "
+                f"(lock {lock_path}). Wait for it to finish or cancel it."
+            ) from exc
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            else:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+    finally:
+        fh.close()
+
+
+# Copied module must not carry provider caches or state from the source dir.
+_WORKDIR_IGNORE = shutil.ignore_patterns(
+    ".terraform", "*.tfstate", "*.tfstate.*", "crash.log", ".git"
+)
+
+
+def prepare_workdir(tf_dir: Path, state_dir: Path) -> Path:
+    """Refresh ``state_dir/module`` from ``tf_dir``; caller holds the hostname lock."""
+    workdir = state_dir / "module"
+    if workdir.exists():
+        shutil.rmtree(workdir)
+    shutil.copytree(tf_dir, workdir, ignore=_WORKDIR_IGNORE)
+    return workdir
+
+
+# Backend → (argument that selects the state object, value template).
+_REMOTE_BACKENDS: Dict[str, tuple[str, str]] = {
+    "s3": ("key", "{prefix}/{name}/terraform.tfstate"),
+    "azurerm": ("key", "{prefix}/{name}/terraform.tfstate"),
+    "gcs": ("prefix", "{prefix}/{name}"),
+    "consul": ("path", "{prefix}/{name}"),
+}
+SUPPORTED_BACKENDS = ("local",) + tuple(_REMOTE_BACKENDS)
+BACKEND_OVERRIDE_FILE = "ovbuilder_backend_override.tf"
+
+
+def _hcl_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(str(value))
+
+
+def write_remote_backend(
+    workdir: Path,
+    state_dir: Path,
+    backend: str,
+    settings: Dict[str, Any],
+    prefix: str,
+    vm_name: str,
+) -> Path:
+    """
+    Point the working copy at a remote backend for this VM.
+
+    Writes a ``*_override.tf`` (replaces the root ``backend "local"`` block)
+    and a 0600 ``backend.hcl`` passed via ``-backend-config=`` so nothing
+    lands on argv.
+    """
+    key_arg, template = _REMOTE_BACKENDS[backend]
+    (workdir / BACKEND_OVERRIDE_FILE).write_text(
+        f'terraform {{\n  backend "{backend}" {{}}\n}}\n', encoding="utf-8"
+    )
+    merged = dict(settings or {})
+    merged[key_arg] = template.format(
+        prefix=(prefix or "ovbuilder").strip("/"), name=sanitize_state_key(vm_name)
+    )
+    lines = [f"{k} = {_hcl_value(v)}" for k, v in sorted(merged.items())]
+    backend_file = state_dir / "backend.hcl"
+    _write_var_file_text(backend_file, "\n".join(lines) + "\n")
+    return backend_file
+
+
+def push_local_state(workdir: Path, env: dict, local_state: Path) -> bool:
+    """
+    One-time copy of per-VM local state into the remote backend.
+
+    ``terraform state push`` (no ``-force``) refuses lineage/serial mismatches,
+    so an existing remote state is never overwritten.
+    """
+    console.print(f"[cyan]Pushing local state {local_state} to remote backend…[/cyan]")
+    try:
+        subprocess.run(
+            ["terraform", "state", "push", str(local_state)],
+            cwd=workdir,
+            env=env,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        console.print(
+            f"[red]terraform state push failed (exit {e.returncode}); "
+            f"local state left at {local_state}.[/red]"
+        )
+        return False
+    local_state.rename(local_state.with_suffix(".tfstate.migrated"))
+    return True
 
 
 def _vm_name_from_state_file(state_path: Path) -> Optional[str]:
@@ -150,21 +298,23 @@ def ensure_terraform_init(
     env: dict,
     *,
     state_path: Optional[Path] = None,
+    backend_config_file: Optional[Path] = None,
     force_reconfigure: bool = False,
 ) -> bool:
     """
-    Run ``terraform init`` with local backend path for this VM.
+    Run ``terraform init`` with the backend for this VM.
 
-    Uses backend ``path=`` (not deprecated ``-state=``). When ``state_path`` is
-    set, always passes ``-reconfigure`` so switching between per-VM states in
-    the same module directory is safe. Providers land under TF_DATA_DIR when set.
+    Local backend: ``path=`` (not deprecated ``-state=``). Remote backend:
+    ``backend_config_file`` from :func:`write_remote_backend`. Either way
+    ``-reconfigure`` is passed so a reused TF_DATA_DIR never keeps a stale
+    backend. Providers land under TF_DATA_DIR when set.
     """
     terraform_meta = Path(env.get("TF_DATA_DIR") or (tf_dir / ".terraform"))
     needs_init = force_reconfigure or not (
         terraform_meta.is_dir() and any(terraform_meta.iterdir())
     )
-    # Backend path must be applied whenever we target a specific state file.
-    if state_path is not None:
+    # Backend must be applied whenever we target a specific state.
+    if state_path is not None or backend_config_file is not None:
         needs_init = True
 
     if not needs_init:
@@ -172,7 +322,10 @@ def ensure_terraform_init(
 
     console.print(f"[dim]terraform init in {tf_dir}…[/dim]")
     cmd = ["terraform", "init", "-input=false", "-upgrade=false"]
-    if state_path is not None:
+    if backend_config_file is not None:
+        cmd.append("-reconfigure")
+        cmd.append(f"-backend-config={backend_config_file}")
+    elif state_path is not None:
         cmd.append("-reconfigure")
         cmd.append(f"-backend-config=path={state_path}")
     try:
@@ -183,14 +336,19 @@ def ensure_terraform_init(
         return False
 
 
-def _write_var_file(path: Path, payload: dict) -> None:
-    """Write JSON var-file with restrictive permissions (may contain passwords)."""
+def _write_var_file_text(path: Path, text: str) -> None:
+    """Write a file with 0600 permissions (may contain passwords)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
     try:
         path.chmod(0o600)
     except OSError:
         pass
+
+
+def _write_var_file(path: Path, payload: dict) -> None:
+    """Write JSON var-file with restrictive permissions (may contain passwords)."""
+    _write_var_file_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 def run_terraform_apply(
@@ -222,14 +380,47 @@ def run_terraform_apply(
         console.print(f"[red]No Terraform root module found at {tf_dir}[/red]")
         return False
 
+    backend = (getattr(config, "terraform_backend", "") or "local").strip().lower()
+    if backend not in SUPPORTED_BACKENDS:
+        console.print(
+            f"[red]Unsupported terraform_backend {backend!r}; "
+            f"use one of: {', '.join(SUPPORTED_BACKENDS)}[/red]"
+        )
+        return False
+
     vm_name = vars.get("vm_name") or "unnamed"
     sdir = state_dir_for_vm(vm_name)
-    state_path = sdir / "terraform.tfstate"
+    try:
+        sdir.chmod(0o700)
+    except OSError:
+        pass
+    try:
+        with hostname_lock(sdir):
+            return _apply_locked(
+                tf_dir, sdir, vm_name, backend, vars, config,
+                vsphere_user, vsphere_password,
+            )
+    except StateLockedError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return False
+
+
+def _apply_locked(
+    tf_dir: Path,
+    sdir: Path,
+    vm_name: str,
+    backend: str,
+    vars: Dict,
+    config: OvbuilderConfig,
+    vsphere_user: Optional[str],
+    vsphere_password: Optional[str],
+) -> bool:
+    """Init + apply in this VM's working copy; caller holds the hostname lock."""
     var_file = sdir / "ovbuilder.auto.tfvars.json"
+    workdir = prepare_workdir(tf_dir, sdir)
 
     env = os.environ.copy()
-    # Isolate plugin/backend metadata per VM so concurrent builds do not clobber
-    # each other's local backend path in a shared module directory.
+    # Per-VM plugin/backend metadata (providers + backend config).
     env["TF_DATA_DIR"] = str(sdir / ".terraform")
 
     effective_user = vsphere_user or vars.get("vsphere_user")
@@ -253,9 +444,24 @@ def run_terraform_apply(
     # Re-resolve after possible migration for this hostname.
     state_path = state_file_for_vm(vm_name)
 
-    # Local backend path (modern replacement for -state=).
-    if not ensure_terraform_init(tf_dir, env, state_path=state_path):
-        return False
+    if backend == "local":
+        if not ensure_terraform_init(workdir, env, state_path=state_path):
+            return False
+        state_label = str(state_path)
+    else:
+        backend_file = write_remote_backend(
+            workdir,
+            sdir,
+            backend,
+            getattr(config, "terraform_backend_config", None) or {},
+            getattr(config, "terraform_state_prefix", "") or "ovbuilder",
+            vm_name,
+        )
+        if not ensure_terraform_init(workdir, env, backend_config_file=backend_file):
+            return False
+        if state_path.exists() and not push_local_state(workdir, env, state_path):
+            return False
+        state_label = f"{backend} backend"
 
     # Normalize CLI "golden" → Terraform "clone".
     provision_mode = vars.get("provision_mode") or "clone"
@@ -298,25 +504,29 @@ def run_terraform_apply(
     }
     _write_var_file(var_file, tf_payload)
 
-    # No -state / -state-out / -backup — local backend owns the state file.
+    lock_timeout = getattr(config, "terraform_lock_timeout", "") or "60s"
+    # No -state / -state-out / -backup — the backend owns the state.
     cmd = [
         "terraform",
         "apply",
         "-auto-approve",
         "-input=false",
+        "-lock=true",
+        f"-lock-timeout={lock_timeout}",
         f"-var-file={var_file}",
     ]
 
-    console.print(f"[cyan]Running Terraform in {tf_dir}[/cyan]")
-    console.print(f"[dim]Mode: {provision_mode} | State: {state_path}[/dim]")
+    console.print(f"[cyan]Running Terraform in {workdir} (copy of {tf_dir})[/cyan]")
+    console.print(f"[dim]Mode: {provision_mode} | State: {state_label}[/dim]")
     if provision_mode == "clone":
         console.print(f"[dim]Template: {tf_payload.get('template_name')}[/dim]")
-    if state_path.exists():
-        console.print(
-            f"[dim]Existing state for [bold]{vm_name}[/bold] — update that VM only.[/dim]"
-        )
-    else:
-        console.print(f"[dim]New state for [bold]{vm_name}[/bold] — create.[/dim]")
+    if backend == "local":
+        if state_path.exists():
+            console.print(
+                f"[dim]Existing state for [bold]{vm_name}[/bold] — update that VM only.[/dim]"
+            )
+        else:
+            console.print(f"[dim]New state for [bold]{vm_name}[/bold] — create.[/dim]")
 
     legacy = tf_dir / "terraform.tfstate"
     if legacy.exists():
@@ -326,7 +536,7 @@ def run_terraform_apply(
         )
 
     try:
-        subprocess.run(cmd, cwd=tf_dir, env=env, check=True)
+        subprocess.run(cmd, cwd=workdir, env=env, check=True)
         return True
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Terraform exited with code {e.returncode}[/red]")

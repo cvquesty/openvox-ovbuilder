@@ -5,6 +5,27 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Parallel builds no longer share a Terraform working directory (#8).**
+  Each apply runs in a private copy of the root module under
+  `tfstate/<hostname>/module`, so concurrent `terraform init` runs cannot
+  rewrite each other's lock file or backend config. An exclusive per-hostname
+  lock makes a second build of the same hostname fail fast instead of racing
+  on its var file and state. Apply now passes `-lock-timeout`
+  (`terraform_lock_timeout`, default `60s`). State directories are mode 0700.
+
+### Added
+
+- **Optional remote state backends.** `terraform_backend` (`local`, `s3`,
+  `azurerm`, `gcs`, `consul`; env `OVBUILDER_TERRAFORM_BACKEND`) with
+  `terraform_backend_config` and `terraform_state_prefix`. Each VM is stored
+  under `<prefix>/<hostname>`; settings go through a 0600 `backend.hcl`, not
+  argv. Existing local per-VM state is pushed once with `terraform state push`
+  (no `-force`). See `docs/TERRAFORM_STATE.md`.
+
 ## [0.97-beta38] - 2026-11-06
 
 ### Added
