@@ -118,6 +118,9 @@ class Settings(BaseSettings):
     ovbuilder_home: str = "/opt/ovbuilder"
     max_concurrent_builds: int = 4
     build_time_limit_seconds: int = 60 * 60
+    # On cancel, the build's process group gets SIGTERM (Terraform stops
+    # gracefully and saves state), then SIGKILL after this many seconds.
+    build_cancel_grace_seconds: int = 60
     max_queued_per_user: int = 8
     # Host-wide backpressure: submit is 429 when queued+running reaches
     # max_concurrent_builds + max_queue_depth.

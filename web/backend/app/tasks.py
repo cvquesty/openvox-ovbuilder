@@ -10,8 +10,11 @@ vSphere credentials) from Postgres so Redis never sees the password.
 from __future__ import annotations
 
 import os
+import queue
 import re
+import signal
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -119,6 +122,50 @@ def _build_command(req: Dict[str, Any], job_id: str) -> tuple[list[str], dict]:
     return cmd, env_vars
 
 
+def _signal_group(proc: subprocess.Popen, sig: int) -> None:
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, sig)
+        elif sig == getattr(signal, "SIGKILL", None):
+            proc.kill()
+        else:
+            proc.terminate()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _terminate_build(proc: subprocess.Popen, grace_seconds: float) -> None:
+    """
+    Stop ovbuilder and everything it started (terraform, ssh, …).
+
+    The build runs in its own session, so its pid is the process group id.
+    SIGTERM lets Terraform finish writing state; SIGKILL follows after the
+    grace period. The group is signalled again after ovbuilder exits because
+    a grandchild can outlive it.
+    """
+    _signal_group(proc, signal.SIGTERM)
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        pass
+    _signal_group(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+_EOF = object()
+
+
+def _pump_lines(stream, out: "queue.Queue[object]") -> None:
+    try:
+        for line in stream:
+            out.put(line)
+    finally:
+        out.put(_EOF)
+
+
 def _mark_cancelled(job, log_lines: Optional[list[str]] = None):
     job.status = BuildStatus.cancelled
     job.error = job.error or "Cancelled by user"
@@ -165,15 +212,30 @@ def run_build(self, job_id: str) -> Dict[str, Any]:
             text=True,
             env=env_vars,
             cwd=settings.ovbuilder_home,
+            # Own process group so cancel reaches terraform, not just ovbuilder.
+            start_new_session=(os.name == "posix"),
         )
         assert proc.stdout is not None
-        for line in proc.stdout:
-            log_lines.append(line.rstrip("\n"))
-            if len(log_lines) > 200:
-                log_lines = log_lines[-200:]
-            job.log_tail = "\n".join(log_lines)
-            lines_since_persist += 1
-            lines_since_poll += 1
+        lines: "queue.Queue[object]" = queue.Queue()
+        threading.Thread(
+            target=_pump_lines, args=(proc.stdout, lines), daemon=True
+        ).start()
+        while True:
+            # Wake up even when the build is silent so cancel is never stuck
+            # behind a long quiet step (clone, SSH wait, …).
+            try:
+                item = lines.get(timeout=_STATUS_POLL_SECONDS)
+            except queue.Empty:
+                item = None
+            if item is _EOF:
+                break
+            if item is not None:
+                log_lines.append(str(item).rstrip("\n"))
+                if len(log_lines) > 200:
+                    log_lines = log_lines[-200:]
+                job.log_tail = "\n".join(log_lines)
+                lines_since_persist += 1
+                lines_since_poll += 1
             now = time.monotonic()
 
             if _should_poll_status(lines_since_poll, now - last_poll):
@@ -184,19 +246,15 @@ def run_build(self, job_id: str) -> Dict[str, Any]:
                     BuildStatus.cancelled,
                     BuildStatus.cancelling,
                 ):
-                    if _should_flush_logs(
-                        lines_since_persist, now - last_persist, status_changed=True
-                    ):
+                    if lines_since_persist:
                         update_job_log_sync(job_id, job.log_tail)
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=15)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
+                    _terminate_build(proc, settings.build_cancel_grace_seconds)
                     job = latest
                     return _mark_cancelled(job, log_lines)
 
-            if _should_flush_logs(lines_since_persist, now - last_persist):
+            if lines_since_persist and _should_flush_logs(
+                lines_since_persist, now - last_persist
+            ):
                 # Log-only write: a full-row save would clobber cancel status
                 # set by the API in another process.
                 update_job_log_sync(job_id, job.log_tail)
@@ -211,6 +269,8 @@ def run_build(self, job_id: str) -> Dict[str, Any]:
         notify_job(job)
         return {"job_id": job_id, "status": job.status.value, "error": job.error}
     except Exception as exc:  # noqa: BLE001
+        if proc is not None and proc.poll() is None:
+            _terminate_build(proc, settings.build_cancel_grace_seconds)
         job.status = BuildStatus.failed
         job.error = str(exc)
         job.finished_at = datetime.now(timezone.utc)

@@ -5,6 +5,23 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta41] - 2026-11-06
+
+### Fixed
+
+- **Cancelling a running build now stops Terraform (#12).** The worker starts
+  `ovbuilder` in its own process group and, on cancel, sends SIGTERM to the
+  whole group (so the `terraform` child stops and saves state), then SIGKILL
+  after `BUILD_CANCEL_GRACE_SECONDS` (default 60). Before, only `ovbuilder`
+  was signalled and `terraform apply` kept running.
+- **Cancel no longer waits for build output.** The worker checks for cancel
+  about every two seconds even while the build is silent, instead of only
+  when a new log line arrives.
+- **Cancel no longer kills the Celery pool process.** `POST
+  /api/builds/{id}/cancel` revokes without `terminate=True`, which had killed
+  the worker before it could stop the build, leaving the job stuck in
+  `cancelling` and Terraform orphaned.
+
 ## [0.97-beta40] - 2026-11-06
 
 ### Added

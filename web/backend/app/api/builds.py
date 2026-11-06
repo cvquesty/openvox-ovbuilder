@@ -94,7 +94,10 @@ async def cancel_build(job_id: str, user: UserOut = Depends(require_builder)):
         raise HTTPException(status.HTTP_409_CONFLICT, f"Cannot cancel a {job.status.value} job")
 
     if job.celery_task_id:
-        celery_app.control.revoke(job.celery_task_id, terminate=True, signal="SIGTERM")
+        # No terminate=True: killing the pool process would orphan terraform
+        # and strand the job in `cancelling`. A running worker sees the status
+        # within a few seconds and stops the whole build process group.
+        celery_app.control.revoke(job.celery_task_id)
 
     job.status = BuildStatus.cancelled if job.status == BuildStatus.queued else BuildStatus.cancelling
     if job.status == BuildStatus.cancelled:
