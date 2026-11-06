@@ -5,6 +5,28 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta34] - 2026-11-06
+
+### Security
+
+- **web/frontend: nanoid override 3.3.16 → 3.3.20.** Fixes
+  GHSA-2v37-7h3g-55p8 (high: custom generators loop forever when size is
+  zero). The pinned override held the transitive (postcss) copy below the
+  patched 3.3.18; `npm audit` is now clean.
+- **Raise Python dependency floors past known CVEs** so an existing venv
+  that already satisfies the old `>=` floor still gets upgraded:
+  - `paramiko>=3.4.0` (CVE-2023-48795, SSH "Terrapin" prefix truncation),
+    in `requirements.txt` and `pyproject.toml`.
+  - `fastapi>=0.115.3` (pulls `starlette>=0.40.0`, CVE-2024-47874 multipart
+    form DoS).
+  - `python-multipart>=0.0.18` (CVE-2024-53981, boundary-parsing DoS).
+  - `PyJWT>=2.10.1` (CVE-2024-53861, `iss` partial-match bypass in 2.10.0).
+
+### Changed
+
+- **web/frontend:** vite 8.3.0 → 8.3.4 and source-map-js 1.2.1 → 1.2.2
+  (Dependabot #43, #42).
+
 ## [0.97-beta33] - 2026-09-18
 
 ### Fixed
