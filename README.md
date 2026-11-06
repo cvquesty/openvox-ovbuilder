@@ -256,6 +256,20 @@ ovbuilder build --help
 ovbuilder config
 ```
 
+### Destroy a VM
+
+```bash
+ovbuilder destroy web01            # asks for confirmation
+ovbuilder destroy web01 --yes      # scripts
+```
+
+Destroys the VM and its disks, then retires its per-VM Terraform state (state
+files move to `tfstate/.retired/`). It refuses to run while a build of that
+hostname holds the lock, and it also cleans up after a cancelled build: a
+partly created VM is destroyed, and leftover state is retired even if the VM
+never appeared. Power, snapshot, resize, and lease actions live in the web
+app (see [docs/WEB.md](docs/WEB.md#vm-lifecycle)).
+
 ## How it works
 
 | Piece | Role |
