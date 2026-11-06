@@ -115,6 +115,46 @@ def test_cancel_queued_job(api, monkeypatch):
     assert stored.status == BuildStatus.cancelled
 
 
+def test_cancel_running_job_leaves_kill_to_worker(api, monkeypatch):
+    revokes: list[tuple] = []
+    monkeypatch.setattr(
+        "app.api.builds.celery_app.control.revoke",
+        lambda *a, **k: revokes.append((a, k)),
+    )
+    job = BuildJob(
+        id=str(uuid.uuid4()),
+        status=BuildStatus.running,
+        request=BuildRequest(hostname="web01", ip="10.0.0.8", os_image="ubuntu-24.04"),
+        requested_by="alice",
+        created_at=datetime.now(timezone.utc),
+        celery_task_id="celery-task-9",
+    )
+    save_job_sync(job)
+
+    resp = api.post(f"/api/builds/{job.id}/cancel")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "cancelling"
+    # terminate=True would kill the pool process and orphan terraform.
+    assert revokes == [(("celery-task-9",), {})]
+    stored = get_job_sync(job.id)
+    assert stored is not None
+    assert stored.status == BuildStatus.cancelling
+    assert stored.finished_at is None
+
+
+def test_cancel_finished_job_conflicts(api):
+    job = BuildJob(
+        id=str(uuid.uuid4()),
+        status=BuildStatus.succeeded,
+        request=BuildRequest(hostname="web01", ip="10.0.0.8", os_image="ubuntu-24.04"),
+        requested_by="alice",
+        created_at=datetime.now(timezone.utc),
+    )
+    save_job_sync(job)
+    resp = api.post(f"/api/builds/{job.id}/cancel")
+    assert resp.status_code == 409
+
+
 def test_admin_lists_all_jobs(job_db):
     save_job_sync(
         BuildJob(

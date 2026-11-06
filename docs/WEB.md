@@ -354,7 +354,7 @@ workers do not share a state file. Do not run bare `terraform apply` inside
 - `GET /api/auth/users` — admin: list users, LDAP roles, overrides
 - `PUT /api/auth/users/{username}` — admin: set or clear `role_override`
 - `POST /api/builds` — queue a build
-- `POST /api/builds/{id}/cancel` — stop a queued/running job
+- `POST /api/builds/{id}/cancel` — stop a queued/running job (owner or admin; see [Cancelling builds](#cancelling-builds))
 - `GET /api/inventory/os-images` — live `ovbuilder-*` templates (name + label; source DC is not returned). Config goldens if vCenter is down and nothing is cached.
 - `GET /api/inventory/environments` — env → datastore-cluster mapping
 - `GET /api/inventory/clusters` — live compute clusters
@@ -444,6 +444,17 @@ vars. Restrict Postgres access the same way you restrict `.env`.
 Submit is rejected with HTTP 429 when the caller already has
 `MAX_QUEUED_PER_USER` queued+running jobs, or when the host-wide total reaches
 `MAX_CONCURRENT_BUILDS + MAX_QUEUE_DEPTH`.
+
+### Cancelling builds
+
+`POST /api/builds/{id}/cancel` (the job's owner or an admin) marks a queued
+job `cancelled` at once and revokes its Celery task. A running job moves to
+`cancelling`; the worker notices within about two seconds, even while the build
+prints nothing. It sends SIGTERM to the whole build process group (ovbuilder,
+`terraform`, and anything else it started) so Terraform can stop cleanly and
+save its state, sends SIGKILL after `BUILD_CANCEL_GRACE_SECONDS` (default 60),
+and then marks the job `cancelled`. A VM that Terraform had already started
+creating may still exist in vCenter; check it before rebuilding the hostname.
 
 ### LDAP TLS
 
