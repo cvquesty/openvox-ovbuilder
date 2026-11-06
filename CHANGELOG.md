@@ -5,6 +5,24 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta45] - 2026-11-06
+
+### Fixed
+
+- **Packaging: PEP 639 license metadata.** `pyproject.toml` now uses the
+  SPDX expression `license = "Apache-2.0"` with `license-files = ["LICENSE"]`
+  and drops the deprecated `License :: OSI Approved :: Apache Software
+  License` classifier, so building no longer prints setuptools' "License
+  classifiers are deprecated" warning. The build backend requires
+  `setuptools>=77` (first release with PEP 639 support). The wheel's
+  metadata carries `License-Expression: Apache-2.0`.
+
+### Changed
+
+- **CI:** the `python` job builds the wheel and fails on a setuptools
+  license deprecation warning or if `License-Expression: Apache-2.0` is
+  missing from the wheel metadata.
+
 ## [0.97-beta44] - 2026-11-06
 
 ### Added

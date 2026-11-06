@@ -38,6 +38,22 @@ jobs:
           pip install -e .
           pip install pytest
       - run: pytest -q
+      - name: Wheel builds with PEP 639 license metadata and no license warnings
+        run: |
+          pip wheel . --no-deps -w dist -v > build.log 2>&1 || { cat build.log; exit 1; }
+          if grep -nE "License classifiers are deprecated|license.*(deprecated|SetuptoolsDeprecationWarning)|_finalize_license" build.log; then
+            echo "::error::setuptools emitted a license deprecation warning"; exit 1
+          fi
+          python - <<'EOF'
+          import glob, sys, zipfile
+          whl = glob.glob("dist/ovbuilder-*.whl")[0]
+          with zipfile.ZipFile(whl) as z:
+              meta = z.read(next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))).decode()
+          lines = meta.splitlines()
+          print("\n".join(line for line in lines if line.startswith(("License", "Classifier: License", "Metadata-Version"))))
+          if "License-Expression: Apache-2.0" not in lines or any(line.startswith("Classifier: License") for line in lines):
+              sys.exit("wheel METADATA lacks License-Expression: Apache-2.0 or still has a License classifier")
+          EOF
 
   web-backend:
     runs-on: ubuntu-latest
