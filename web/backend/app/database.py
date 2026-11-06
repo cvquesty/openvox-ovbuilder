@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
-from sqlalchemy import JSON, Boolean, DateTime, String, Text, create_engine, func, select
+from sqlalchemy import JSON, Boolean, DateTime, String, Text, create_engine, delete, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -30,6 +30,7 @@ from .models import (
     NotificationPrefsUpdate,
     Role,
     UserAdminOut,
+    VmLease,
     coerce_role,
     effective_role,
 )
@@ -90,6 +91,23 @@ class NotificationPrefRow(Base):
     on_success: Mapped[bool] = mapped_column(Boolean, default=True)
     on_failure: Mapped[bool] = mapped_column(Boolean, default=True)
     on_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class VmLeaseRow(Base):
+    """Lease / reclaim bookkeeping per VM name (see models.VmLease)."""
+
+    __tablename__ = "vm_leases"
+
+    vm_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    explicit: Mapped[bool] = mapped_column(Boolean, default=False)
+    powered_off_since: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_action: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    last_action_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -584,3 +602,69 @@ def get_user_email_sync(username: str) -> Optional[str]:
     with factory() as session:
         row = session.get(UserRow, username)
         return (row.email or None) if row else None
+
+
+# ---------------------------------------------------------------------------
+# VM leases — lifecycle / reclaim bookkeeping
+# ---------------------------------------------------------------------------
+
+_LEASE_FIELDS = (
+    "expires_at",
+    "explicit",
+    "powered_off_since",
+    "last_action",
+    "last_action_at",
+    "updated_by",
+)
+
+
+def _to_lease(row: VmLeaseRow) -> VmLease:
+    return VmLease(
+        vm_name=row.vm_name,
+        expires_at=_aware(row.expires_at),
+        explicit=bool(row.explicit),
+        powered_off_since=_aware(row.powered_off_since),
+        last_action=row.last_action,
+        last_action_at=_aware(row.last_action_at),
+        updated_by=row.updated_by,
+    )
+
+
+async def list_leases() -> dict[str, VmLease]:
+    factory = _async_session()
+    async with factory() as session:
+        result = await session.execute(select(VmLeaseRow))
+        return {r.vm_name: _to_lease(r) for r in result.scalars().all()}
+
+
+async def get_lease(vm_name: str) -> Optional[VmLease]:
+    factory = _async_session()
+    async with factory() as session:
+        row = await session.get(VmLeaseRow, vm_name)
+        return _to_lease(row) if row else None
+
+
+async def update_lease(vm_name: str, **fields) -> VmLease:
+    """Create or patch a lease row; only keys passed in *fields* change."""
+    unknown = set(fields) - set(_LEASE_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown lease fields: {sorted(unknown)}")
+    factory = _async_session()
+    async with factory() as session:
+        row = await session.get(VmLeaseRow, vm_name)
+        if row is None:
+            row = VmLeaseRow(vm_name=vm_name, explicit=False, updated_at=_utcnow())
+            session.add(row)
+        for key, value in fields.items():
+            setattr(row, key, value)
+        row.updated_at = _utcnow()
+        await session.commit()
+        await session.refresh(row)
+        return _to_lease(row)
+
+
+async def delete_lease(vm_name: str) -> None:
+    factory = _async_session()
+    async with factory() as session:
+        await session.execute(delete(VmLeaseRow).where(VmLeaseRow.vm_name == vm_name))
+        await session.commit()

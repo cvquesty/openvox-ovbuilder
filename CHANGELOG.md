@@ -5,6 +5,41 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta44] - 2026-11-06
+
+### Added
+
+- **VM lifecycle management (#5).** The Virtual machines page and
+  `/api/vms` now cover hard reset, snapshot list/restore/delete (plus
+  memory snapshots), resize (vCPU, memory, grow a disk), leases, destroy,
+  and policy-driven reclaim of expired or idle VMs. Reclaim is off by
+  default (`VM_LEASE_DAYS`, `VM_IDLE_DAYS`, `VM_RECLAIM_ACTION`,
+  `VM_RECLAIM_ENABLED`), only touches ovbuilder-built VMs, has an admin
+  preview, and runs hourly from the new `ovbuilder-reclaim.timer`.
+  New `vm_leases` table (Alembic `0004`).
+- **`ovbuilder destroy <hostname>`.** Destroys the VM and retires its
+  per-VM Terraform state to `tfstate/.retired/`. Also cleans up a VM or
+  state left behind by a cancelled or failed build.
+
+### Changed
+
+- **Builders can destroy their own VMs** (was admin-only); confirmation
+  requires the VM name (`DELETE /api/vms/{name}?confirm={name}`).
+  `VM_BUILDER_CAN_DESTROY=false` restores admin-only.
+- Lifecycle actions take the build's per-hostname lock and return 409
+  while a build of that hostname is applying. vSphere calls run off the
+  API event loop.
+
+### Fixed
+
+- **VM ownership comes only from succeeded builds.** Before, any job with
+  a matching hostname, including a failed one, let a builder power off,
+  snapshot, or list an existing VM of that name.
+- Templates (Packer goldens) can no longer be powered, snapshotted, or
+  destroyed through the lifecycle API, and no longer appear in the VM list.
+- Destroying a VM no longer leaves its Terraform state (and the var file
+  holding the vSphere password) behind.
+
 ## [0.97-beta43] - 2026-11-06
 
 ### Fixed

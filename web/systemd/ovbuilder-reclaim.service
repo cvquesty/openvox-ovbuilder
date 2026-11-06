@@ -1,0 +1,18 @@
+[Unit]
+Description=OpenVox OV Builder VM reclaim sweep (expired / idle VMs)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=ovbuilder
+Group=ovbuilder
+WorkingDirectory=/opt/ovbuilder/web/backend
+Environment=HOME=/opt/ovbuilder
+Environment=PATH=/opt/ovbuilder/venv/bin:/usr/local/bin:/usr/bin
+Environment=PYTHONPATH=/opt/ovbuilder/web/backend
+EnvironmentFile=-/opt/ovbuilder/web/backend/.env
+# Acts only when VM_RECLAIM_ENABLED=true; otherwise logs a dry run.
+ExecStart=/opt/ovbuilder/venv/bin/python -m app.vm_lifecycle
+NoNewPrivileges=true
+PrivateTmp=true

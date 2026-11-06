@@ -453,6 +453,54 @@ under `/opt/ovbuilder/.local/share/ovbuilder/tfstate/`. Parallel Celery
 workers do not share a state file. Do not run bare `terraform apply` inside
 `/opt/ovbuilder/terraform`.
 
+## VM lifecycle
+
+The **Virtual machines** page and `/api/vms` cover the rest of a VM's life
+after a build: power on/off, guest reboot, hard reset, snapshots (create,
+restore, delete), resize, leases, destroy, and reclaim.
+
+**Who can do what.** A VM belongs to whoever ran the latest *succeeded*
+build that created it. Builders see and act on their own VMs; admins see
+everything and can act on any VM. A failed or cancelled build never grants
+ownership, so a build cannot claim an existing VM by reusing its hostname.
+Templates (`ovbuilder-*` goldens) are refused by every action.
+
+**Leftovers of failed or cancelled builds.** A cancelled build can leave a
+partly created VM in vCenter. If that VM's UUID is in the build's Terraform
+state, it shows up as **partial build** for the build's owner, who can only
+destroy it. Admins can destroy any VM.
+
+**Locking and Terraform state.** Mutating actions on a VM ovbuilder built
+take the same per-hostname lock as `ovbuilder build`
+(`tfstate/<hostname>/.ovbuilder.lock`) and return 409 while a build of that
+hostname is applying. Destroy moves the state files to
+`tfstate/.retired/<hostname>-<timestamp>/` and deletes the var file
+(which holds the vSphere password) and the module copy, so the next build of
+that hostname starts fresh. From the CLI, use `ovbuilder destroy <hostname>`.
+With a remote Terraform backend, the remote state object is left in place;
+the vSphere provider drops the missing VM on the next apply.
+
+**Resize.** vCPU and memory changes on a running VM need CPU/memory hot-add
+enabled in vSphere (memory never shrinks while running); otherwise power off
+first. Disks only grow, never while the VM has snapshots, and the guest
+partition/filesystem must be extended inside the OS.
+
+**Leases and reclaim.** Off by default. Settings (`.env`):
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `VM_LEASE_DAYS` | `0` | Default lease from build completion (0 = none) |
+| `VM_LEASE_MAX_DAYS` | `90` | Furthest a builder can extend their own lease |
+| `VM_IDLE_DAYS` | `0` | Reclaim VMs seen powered off this long (0 = never) |
+| `VM_RECLAIM_ACTION` | `power_off` | `power_off` or `destroy` |
+| `VM_RECLAIM_ENABLED` | `false` | Let the hourly timer act (otherwise it only logs a dry run) |
+| `VM_BUILDER_CAN_DESTROY` | `true` | Builders may destroy their own VMs |
+
+Only ovbuilder-built VMs are ever reclaimed. `ovbuilder-reclaim.timer` runs
+`python -m app.vm_lifecycle` hourly; admins can preview and run it from the
+**Reclaim** button. Idle time is measured from the first sweep that sees the
+VM powered off, so idle reclaim needs the timer (or previews) to run.
+
 ## API surface
 
 - `GET /api/health` — liveness plus `db_ok`, queued/running/active counts, and queue caps
@@ -472,9 +520,14 @@ workers do not share a state file. Do not run bare `terraform apply` inside
 
 Live inventory endpoints (everything above except `environments`) are cached;
 see [Inventory caching](#inventory-caching).
-- `GET /api/vms` — live VM list
-- `POST /api/vms/{name}/power-on|power-off|reboot|snapshot`
-- `DELETE /api/vms/{name}` — admin only
+- `GET /api/vms` — live VM list with owner, lease expiry, and `orphan` flag
+- `POST /api/vms/{name}/power-on|power-off|reboot|reset`
+- `GET|POST /api/vms/{name}/snapshots`, `POST .../snapshots/{id}/revert`, `DELETE .../snapshots/{id}`
+- `POST /api/vms/{name}/resize` — `{cpus, memory_gb, disk_gb, disk_index}`
+- `GET|PUT /api/vms/{name}/lease` — `{expires_at}`
+- `DELETE /api/vms/{name}?confirm={name}` — destroy and retire Terraform state
+- `GET /api/vms/reclaim/preview`, `POST /api/vms/reclaim` — admin
+  (see [VM lifecycle](#vm-lifecycle))
 - `GET|PUT /api/settings` — admin-only vSphere, npm registry, notifications
 - `GET|PUT /api/auth/me/notifications` — the current user's build email preferences
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import secrets
 from functools import lru_cache
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -151,6 +151,23 @@ class Settings(BaseSettings):
     inventory_stale_ttl_seconds: int = 3600
     # After a failed vCenter call, skip new attempts for this long.
     inventory_error_backoff_seconds: int = 15
+
+    # --- VM lifecycle / reclaim policy --------------------------------------
+    # Only VMs created by a succeeded build are ever leased or reclaimed.
+    # Default lease from build completion; 0 = no expiry unless one is set.
+    vm_lease_days: int = 0
+    # Furthest a builder may push their own lease from now (admins: no cap).
+    vm_lease_max_days: int = 90
+    # Reclaim a VM seen powered off for this many days; 0 = never.
+    vm_idle_days: int = 0
+    # What reclaim does to an expired or idle VM: power_off | destroy.
+    vm_reclaim_action: Literal["power_off", "destroy"] = "power_off"
+    # The scheduled reclaim (systemd timer) acts only when true; previews
+    # from the admin UI/API work either way.
+    vm_reclaim_enabled: bool = False
+    # Builders may destroy VMs their own succeeded builds created.
+    vm_builder_can_destroy: bool = True
+
 
     # --- Notifications (all channels off until configured) ------------------
     # Admin Settings (runtime_settings.json) override these per field.

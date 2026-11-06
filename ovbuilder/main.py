@@ -12,6 +12,7 @@ DESIGN LANGUAGE (matches ovox CLI)
 Subcommands
 -----------
   build   — provision a VM (golden clone or ISO)
+  destroy — destroy a VM and retire its per-VM Terraform state
   config  — dump effective configuration
   version — print version string
 """
@@ -26,6 +27,7 @@ from rich.panel import Panel
 
 from .build import build as build_command
 from .config import get_config_manager
+from .destroy import destroy as destroy_command
 from .version import get_version
 
 console = Console()
@@ -94,6 +96,9 @@ def main(
 # Register build as both default and explicit subcommand.
 cli.command("build", help="Build a VM from a Packer golden template or ISO")(
     build_command
+)
+cli.command("destroy", help="Destroy a VM and retire its per-VM Terraform state")(
+    destroy_command
 )
 
 

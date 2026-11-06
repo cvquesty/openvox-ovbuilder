@@ -256,6 +256,20 @@ ovbuilder build --help
 ovbuilder config
 ```
 
+### Destroy a VM
+
+```bash
+ovbuilder destroy web01            # asks for confirmation
+ovbuilder destroy web01 --yes      # scripts
+```
+
+Destroys the VM and its disks, then retires its per-VM Terraform state (state
+files move to `tfstate/.retired/`). It refuses to run while a build of that
+hostname holds the lock, and it also cleans up after a cancelled build: a
+partly created VM is destroyed, and leftover state is retired even if the VM
+never appeared. Power, snapshot, resize, and lease actions live in the web
+app (see [docs/WEB.md](docs/WEB.md#vm-lifecycle)).
+
 ## How it works
 
 | Piece | Role |
@@ -410,7 +424,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta43` |
+| ovbuilder CLI | `0.97-beta44` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
@@ -426,7 +440,7 @@ still have a root `data.vsphere_compute_cluster` in `providers.tf` and a
 picker titled “Clusters in SEA3…”.
 
 ```bash
-ovbuilder --version    # need 0.97-beta31+ (this tree: 0.97-beta43)
+ovbuilder --version    # need 0.97-beta31+ (this tree: 0.97-beta44)
 sudo -H ./install.sh   # or ./install.sh --user
 hash -r && ovbuilder --version
 ```

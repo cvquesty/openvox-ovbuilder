@@ -123,6 +123,23 @@ class BuildJobPublic(BaseModel):
         return cls.model_validate(payload)
 
 
+class VmLease(BaseModel):
+    """Lifecycle bookkeeping for a VM a build created.
+
+    ``explicit`` means someone set ``expires_at`` (``None`` then means "never
+    expires"); otherwise expiry is derived from build completion + policy.
+    ``powered_off_since`` is when reclaim first observed the VM powered off.
+    """
+
+    vm_name: str
+    expires_at: Optional[datetime] = None
+    explicit: bool = False
+    powered_off_since: Optional[datetime] = None
+    last_action: Optional[str] = None
+    last_action_at: Optional[datetime] = None
+    updated_by: Optional[str] = None
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"

@@ -819,10 +819,13 @@ render_unit "${ROOT}/web/systemd/ovbuilder-web.service" /tmp/ovbuilder-web.servi
 render_unit "${ROOT}/web/systemd/ovbuilder-worker.service" /tmp/ovbuilder-worker.service
 install -m 644 /tmp/ovbuilder-web.service /etc/systemd/system/ovbuilder-web.service
 install -m 644 /tmp/ovbuilder-worker.service /etc/systemd/system/ovbuilder-worker.service
-rm -f /tmp/ovbuilder-web.service /tmp/ovbuilder-worker.service
+render_unit "${ROOT}/web/systemd/ovbuilder-reclaim.service" /tmp/ovbuilder-reclaim.service
+install -m 644 /tmp/ovbuilder-reclaim.service /etc/systemd/system/ovbuilder-reclaim.service
+install -m 644 "${ROOT}/web/systemd/ovbuilder-reclaim.timer" /etc/systemd/system/ovbuilder-reclaim.timer
+rm -f /tmp/ovbuilder-web.service /tmp/ovbuilder-worker.service /tmp/ovbuilder-reclaim.service
 systemctl daemon-reload
-systemctl enable ovbuilder-web.service ovbuilder-worker.service
-log_ok "Enabled ovbuilder-web and ovbuilder-worker"
+systemctl enable ovbuilder-web.service ovbuilder-worker.service ovbuilder-reclaim.timer
+log_ok "Enabled ovbuilder-web, ovbuilder-worker, and ovbuilder-reclaim.timer"
 
 # --- nginx ------------------------------------------------------------------
 
@@ -895,6 +898,7 @@ if [[ "$START_SERVICES" == true ]]; then
     # restart (not start) so a re-run picks up new code and .env changes.
     log_info "Starting ovbuilder-web and ovbuilder-worker"
     systemctl restart ovbuilder-web ovbuilder-worker
+    systemctl start ovbuilder-reclaim.timer
     systemctl --no-pager --full status ovbuilder-web ovbuilder-worker || true
 fi
 
@@ -910,7 +914,7 @@ Web platform installed.
 
 Next:
   1. Edit ${ENV_FILE}  (LDAP bind password, CORS origin, vSphere)
-  2. systemctl start ovbuilder-web ovbuilder-worker   # or re-run with --start
+  2. systemctl start ovbuilder-web ovbuilder-worker ovbuilder-reclaim.timer   # or re-run with --start
   3. Verify:
        curl -sS http://127.0.0.1:4567/api/health
        curl -sS http://127.0.0.1/api/health

@@ -112,21 +112,40 @@ export const inventory = {
   datastores: () => request<string[]>('/inventory/datastores'),
 };
 
+const vmPath = (name: string) => `/vms/${encodeURIComponent(name)}`;
+type ActionResult = Record<string, unknown>;
+
 export const vms = {
   list: () => request<InventoryVm[]>('/vms'),
-  powerOn: (name: string) =>
-    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/power-on`, { method: 'POST' }),
-  powerOff: (name: string) =>
-    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/power-off`, { method: 'POST' }),
-  reboot: (name: string) =>
-    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/reboot`, { method: 'POST' }),
-  snapshot: (name: string, snapName: string, description = '') =>
-    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}/snapshot`, {
+  powerOn: (name: string) => request<ActionResult>(`${vmPath(name)}/power-on`, { method: 'POST' }),
+  powerOff: (name: string) => request<ActionResult>(`${vmPath(name)}/power-off`, { method: 'POST' }),
+  reboot: (name: string) => request<ActionResult>(`${vmPath(name)}/reboot`, { method: 'POST' }),
+  reset: (name: string) => request<ActionResult>(`${vmPath(name)}/reset`, { method: 'POST' }),
+  snapshots: (name: string) => request<VmSnapshot[]>(`${vmPath(name)}/snapshots`),
+  snapshot: (name: string, snapName: string, description = '', memory = false) =>
+    request<ActionResult>(`${vmPath(name)}/snapshots`, {
       method: 'POST',
-      body: JSON.stringify({ name: snapName, description }),
+      body: JSON.stringify({ name: snapName, description, memory }),
+    }),
+  revertSnapshot: (name: string, snapshotId: string) =>
+    request<ActionResult>(`${vmPath(name)}/snapshots/${encodeURIComponent(snapshotId)}/revert`, { method: 'POST' }),
+  deleteSnapshot: (name: string, snapshotId: string, removeChildren = false) =>
+    request<ActionResult>(
+      `${vmPath(name)}/snapshots/${encodeURIComponent(snapshotId)}?remove_children=${removeChildren}`,
+      { method: 'DELETE' },
+    ),
+  resize: (name: string, body: VmResize) =>
+    request<ActionResult>(`${vmPath(name)}/resize`, { method: 'POST', body: JSON.stringify(body) }),
+  lease: (name: string) => request<VmLease>(`${vmPath(name)}/lease`),
+  setLease: (name: string, expiresAt: string | null) =>
+    request<VmLease>(`${vmPath(name)}/lease`, {
+      method: 'PUT',
+      body: JSON.stringify({ expires_at: expiresAt }),
     }),
   destroy: (name: string) =>
-    request<Record<string, unknown>>(`/vms/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    request<ActionResult>(`${vmPath(name)}?confirm=${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  reclaimPreview: () => request<ReclaimReport>('/vms/reclaim/preview'),
+  reclaim: () => request<ReclaimReport>('/vms/reclaim', { method: 'POST' }),
 };
 
 export interface BuildRequest {
@@ -187,10 +206,67 @@ export interface InventoryVm {
   ip?: string | null;
   cpus?: number | null;
   memory_mb?: number | null;
+  disk_gb?: number | null;
   uuid?: string | null;
   tools?: string;
   folder?: string | null;
   overall_status?: string;
+  owner?: string | null;
+  /** Created by a succeeded ovbuilder build. */
+  managed?: boolean;
+  /** Left behind by a failed/cancelled build (verified via Terraform state). */
+  orphan?: boolean;
+  job_id?: string | null;
+  expires_at?: string | null;
+}
+
+export interface VmSnapshot {
+  id: string;
+  name: string;
+  description: string;
+  created?: string | null;
+  power_state: string;
+  parent_id?: string | null;
+  current: boolean;
+}
+
+export interface VmResize {
+  cpus?: number;
+  memory_gb?: number;
+  disk_gb?: number;
+  disk_index?: number;
+}
+
+export interface VmLease {
+  vm_name: string;
+  owner?: string | null;
+  managed: boolean;
+  expires_at?: string | null;
+  explicit: boolean;
+  powered_off_since?: string | null;
+  last_action?: string | null;
+  last_action_at?: string | null;
+  max_days: number;
+}
+
+export interface ReclaimCandidate {
+  name: string;
+  owner: string;
+  reason: 'expired' | 'idle';
+  action: 'power_off' | 'destroy' | 'none';
+  power_state: string;
+  expires_at?: string | null;
+  powered_off_since?: string | null;
+  error?: string | null;
+  done: boolean;
+}
+
+export interface ReclaimReport {
+  dry_run: boolean;
+  enabled: boolean;
+  policy: { lease_days: number; idle_days: number; action: string };
+  scanned: number;
+  candidates: ReclaimCandidate[];
 }
 
 export interface RuntimeSettings {
