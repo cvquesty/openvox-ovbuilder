@@ -424,7 +424,7 @@ First boot on Alma can take a while while groups download.
 
 | Component | Version / note |
 |-----------|----------------|
-| ovbuilder CLI | `0.97-beta43` |
+| ovbuilder CLI | `0.97-beta44` |
 | Terraform module | Bundled `terraform/modules/vm` (clone + ISO) |
 | Python | 3.9+ |
 | Guest targets | AlmaLinux 10, Ubuntu 24.04 (golden); other ISOs in ISO mode |
@@ -440,7 +440,7 @@ still have a root `data.vsphere_compute_cluster` in `providers.tf` and a
 picker titled “Clusters in SEA3…”.
 
 ```bash
-ovbuilder --version    # need 0.97-beta31+ (this tree: 0.97-beta43)
+ovbuilder --version    # need 0.97-beta31+ (this tree: 0.97-beta44)
 sudo -H ./install.sh   # or ./install.sh --user
 hash -r && ovbuilder --version
 ```
