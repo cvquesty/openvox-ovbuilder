@@ -4,8 +4,10 @@ Self-service frontend for `ovbuilder`. LDAP users pick OS + environment +
 compute cluster + network + size, submit, and the dedicated box runs the CLI
 in parallel via Celery.
 
-The CLI installer (`./install.sh`) does **not** install this stack. Laptop and
-workstation users who only want `ovbuilder` can ignore this document.
+Plain `./install.sh` installs only the CLI. `sudo ./install.sh --web` installs
+this whole stack on a dedicated box (see [Bare-metal install](#bare-metal-install)).
+Laptop and workstation users who only want `ovbuilder` can ignore this
+document.
 
 The Build form OS picker lists live `ovbuilder-*` templates from every
 datacenter (name + short label only). The backend resolves the template's
@@ -18,7 +20,7 @@ SEA3 standalone-host placement requires a current staging install on the
 web box (and on any laptop CLI). If `/opt/ovbuilder` still has a root
 `data.vsphere_compute_cluster` in `providers.tf`, reinstall from tip
 (`sudo ./install.sh` then `sudo ./web/install-web.sh`) before filing a
-placement bug.
+placement bug. (`sudo ./install.sh --web` does both.)
 
 ## Roles
 
@@ -140,63 +142,91 @@ the admin override or is in `ovbuilder-admins`.
 
 ## Prerequisites
 
-Dedicated Linux host with systemd (AlmaLinux / RHEL / Ubuntu). Install the CLI
-first so `/opt/ovbuilder/venv` and the Terraform modules exist.
+Dedicated Linux host with systemd: Ubuntu / Debian (`apt`) or AlmaLinux /
+RHEL / Rocky (`dnf`). The full installer pulls everything below from the
+distro repositories except Terraform.
 
 | Package | Why |
 |---|---|
 | Python 3.9+ with `venv` | API + Celery (same venv as the CLI) |
 | Postgres | Durable job store (`DATABASE_URL`) |
-| Redis | Celery broker / result backend |
+| Redis (Valkey on EL10) | Celery broker / result backend |
 | Nginx | SPA static files + `/api` reverse proxy |
-| Node 20+ / npm | Production frontend build |
+| Node ^20.19 or >=22.12 / npm | Production frontend build (Vite 8) |
 | rsync | Copies `web/` into `/opt/ovbuilder/web` |
+| Terraform 1.5+ | Worker runs `ovbuilder` → Terraform. **Not** installed for you (HashiCorp repo). |
 
-Example (Ubuntu):
-
-```bash
-sudo apt-get update
-sudo apt-get install -y python3 python3-venv postgresql redis-server nginx rsync
-# Node 20+ from NodeSource or your distro, then:
-# sudo apt-get install -y nodejs
-```
-
-Example (AlmaLinux / RHEL):
-
-```bash
-sudo dnf install -y python3 python3-pip postgresql-server redis nginx rsync
-# Enable Postgres/Redis per distro docs, then install Node 20+.
-```
-
-Create the database and role before the first migrate (passwords are local-only):
-
-```bash
-sudo -u postgres createuser --pwprompt ovbuilder
-sudo -u postgres createdb -O ovbuilder ovbuilder
-```
+Ubuntu 24.04 and Debian 12 ship Node 18, which is too old. The installer
+uses an existing `node` on `PATH` when it is new enough, otherwise tries the
+distro package and stops with instructions if that is still too old. On EL9
+it enables the `nodejs:22` (or `nodejs:20`) module stream. It never pipes a
+remote setup script into a shell; install Node 22 LTS from your mirror first,
+or pass `--skip-frontend` and build `web/frontend` elsewhere.
 
 ## Bare-metal install
 
-From a checkout of this repository, as root:
+From a checkout of this repository:
 
 ```bash
-# 1. CLI + Terraform modules (unchanged; safe to re-run)
-sudo ./install.sh
-
-# 2. Web stack: venv deps, .env, Alembic, nginx, systemd
-sudo ./web/install-web.sh
+sudo ./install.sh --web --start
 ```
 
-`install-web.sh` is idempotent: it preserves an existing
-`/opt/ovbuilder/web/backend/.env`, rewrites units/nginx from the in-repo
-templates, and re-runs `alembic upgrade head`. The API also upgrades on
-startup, so a missed install-time migrate is not fatal.
+That runs the CLI install (venv + Terraform modules in `/opt/ovbuilder`),
+then `web/install-web.sh --with-deps --start`, which:
 
-Useful flags:
+1. Installs Postgres, Redis, Nginx, Node, and rsync with `apt` or `dnf`
+   (`postgresql-setup --initdb` on EL), then enables and starts them.
+2. Creates the `ovbuilder` system user, syncs `web/` to `/opt/ovbuilder/web`,
+   and installs the backend requirements into the shared venv.
+3. Seeds `/opt/ovbuilder/web/backend/.env` (mode `0600`) with a generated
+   `SECRET_KEY` and a generated Postgres password in `DATABASE_URL`.
+4. Creates the Postgres role and database named in `DATABASE_URL` and adds
+   a managed loopback password-auth block to the top of `pg_hba.conf`
+   (EL defaults to `ident` for `127.0.0.1`, which rejects the app login).
+5. Runs `alembic upgrade head` when `web/backend/alembic.ini` exists.
+6. Builds the frontend, installs and enables `ovbuilder-web` /
+   `ovbuilder-worker`, and installs the nginx site. On Debian/Ubuntu it
+   disables the stock `sites-enabled/default` (the file stays in
+   `sites-available`). On SELinux-enforcing hosts it sets
+   `httpd_can_network_connect` and labels `frontend/dist`
+   `httpd_sys_content_t`. With firewalld running it opens `http`.
+7. With `--start`, (re)starts the API and worker.
+
+Re-running is safe and is how you upgrade: packages are already present,
+the existing `.env` is kept (its `DATABASE_URL` password is the source of
+truth and is re-applied to the role), the `pg_hba.conf` block is only
+rewritten when it changed, units and the nginx site are re-rendered from the
+in-repo templates, migrations re-run, and `--start` restarts the services.
+
+`install.sh --web` prompts once before touching system packages. Pass `-y`
+for unattended runs. Everything after `--` goes to `web/install-web.sh`:
+
+```bash
+sudo ./install.sh --web -y --start -- --skip-frontend
+```
+
+To manage the packages yourself, install them first and run the two steps
+separately (create the Postgres role/database and put its password in
+`DATABASE_URL` in `.env` before the first migrate):
+
+```bash
+sudo ./install.sh
+sudo ./web/install-web.sh --start
+```
+
+`sudo ./install.sh --uninstall` also stops and removes the two units and the
+nginx site, and deletes `/opt/ovbuilder` (including `.env`; it asks first
+unless `-y`). OS packages, the Postgres database, and Redis data are left in
+place.
+
+`install-web.sh` flags:
 
 | Flag | Effect |
 |---|---|
-| `--start` | Enable **and** start `ovbuilder-web` / `ovbuilder-worker` |
+| `--with-deps` | Install + enable Postgres, Redis, Nginx, Node; create the DB role/database |
+| `--skip-postgres` | With `--with-deps`: Postgres is external or a container; skip install + role creation |
+| `--skip-redis` | With `--with-deps`: Redis is external or a container |
+| `--start` | Enable **and** (re)start `ovbuilder-web` / `ovbuilder-worker` |
 | `--skip-frontend` | Re-run without `npm ci` / `npm run build` |
 | `--skip-nginx` | Skip the site file (units + `.env` only) |
 | `--skip-migrate` | Skip Alembic (fails later if the schema is missing) |
@@ -210,10 +240,37 @@ Overrides (optional):
 | `OVBUILDER_USER` | systemd user (default `ovbuilder`) |
 | `OVBUILDER_SERVER_NAME` | nginx `server_name` (default `_`) |
 | `OVBUILDER_SECRET_KEY` | JWT key if `.env` is empty |
-| `OVBUILDER_DATABASE_URL` | Written when `.env` `DATABASE_URL` is empty or to override |
+| `OVBUILDER_DATABASE_URL` | Written to `.env` `DATABASE_URL`. A non-local host turns off local Postgres provisioning |
 | `OVBUILDER_CORS_ORIGINS` | JSON list, e.g. `["https://builder.example.com"]` |
 
-3. Edit `/opt/ovbuilder/web/backend/.env` — LDAP bind password, CORS origin,
+### Optional: Postgres and Redis in containers
+
+The API, worker, and nginx stay on the host under systemd. Only the data
+services move into containers (Podman or Docker). Bind them to loopback:
+
+```bash
+sudo podman run -d --name ovbuilder-postgres --restart=always \
+  -p 127.0.0.1:5432:5432 -v ovbuilder-pg:/var/lib/postgresql/data \
+  -e POSTGRES_USER=ovbuilder -e POSTGRES_DB=ovbuilder \
+  -e POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+  docker.io/library/postgres:16
+sudo podman run -d --name ovbuilder-redis --restart=always \
+  -p 127.0.0.1:6379:6379 docker.io/library/redis:7
+sudo podman exec ovbuilder-postgres printenv POSTGRES_PASSWORD   # for the URL below
+
+sudo OVBUILDER_DATABASE_URL='postgresql+asyncpg://ovbuilder:<password>@127.0.0.1:5432/ovbuilder' \
+  ./install.sh --web -y --start -- --skip-postgres --skip-redis
+```
+
+The `REDIS_URL` / `CELERY_*` defaults in `.env` already point at
+`127.0.0.1:6379`. For a remote Redis, edit those three keys and re-run.
+Have the container runtime (or `podman generate systemd`) bring the
+containers up at boot. The units only `Wants=` `postgresql.service` /
+`redis.service`, so they will not wait for containers.
+
+### After install
+
+1. Edit `/opt/ovbuilder/web/backend/.env` — LDAP bind password, CORS origin,
    and vSphere (`VSPHERE_SERVER` / `VSPHERE_USER` / `VSPHERE_PASSWORD` /
    `VSPHERE_DATACENTER`). See [Secrets and TLS](#secrets-and-tls) and
    `.env.example`. `SECRET_KEY` is generated on first seed if empty.
@@ -223,7 +280,7 @@ Overrides (optional):
    service account (`OVBUILDER_HOME` / `XDG_CONFIG_HOME`) so the Build form
    maps `dev`/`prod` to the right Storage DRS cluster.
 
-4. Start the units (if you did not pass `--start`):
+2. Start the units (if you did not pass `--start`):
 
 ```bash
 sudo systemctl start ovbuilder-web ovbuilder-worker

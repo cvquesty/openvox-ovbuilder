@@ -3,6 +3,9 @@
 # ovbuilder Installer
 #
 # Installs the ovbuilder CLI for building VMware VMs that register with OpenVox.
+# With --web it then installs the full web platform on a dedicated Linux box:
+# Postgres, Redis, Nginx, Node, the FastAPI API, the Celery worker, and their
+# systemd units (via web/install-web.sh --with-deps).
 #
 # Purpose of this script:
 #   Many OpenVox operators do not use Python daily. Typing "pip" often fails
@@ -19,6 +22,8 @@
 #   ./install.sh -y
 #   ./install.sh --user
 #   ./install.sh --uninstall
+#   sudo ./install.sh --web --start
+#   sudo ./install.sh --web -y -- --skip-postgres --skip-redis
 ###############################################################################
 
 set -euo pipefail
@@ -45,10 +50,43 @@ UNINSTALL=false
 # -y/--yes is accepted for scripted installs; the installer has no prompts yet.
 # shellcheck disable=SC2034
 YES=false
+WEB=false
+WEB_ARGS=()
+
+usage() {
+    cat <<'EOF'
+Usage: ./install.sh [--user] [-y] [--uninstall]
+       sudo ./install.sh --web [-y] [--start] [-- <web/install-web.sh options>]
+
+  --user        Install the CLI under ~/.local (no sudo)
+  -y, --yes     Do not prompt (--web, and --uninstall of a web install)
+  --uninstall   Remove the CLI; with a web install also stops/removes the
+                systemd units and nginx site (the Postgres database is kept)
+  --web         Full platform on a dedicated Linux box: CLI, then
+                web/install-web.sh --with-deps (Postgres, Redis, Nginx,
+                Node, API, Celery worker, systemd units). Re-runnable.
+  --start       With --web: start ovbuilder-web and ovbuilder-worker
+  --            Pass the remaining options to web/install-web.sh
+                (e.g. --skip-postgres --skip-redis --skip-frontend)
+EOF
+}
 
 # Parse args
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --web)
+            WEB=true
+            shift
+            ;;
+        --start)
+            WEB_ARGS+=(--start)
+            shift
+            ;;
+        --)
+            shift
+            WEB_ARGS+=("$@")
+            break
+            ;;
         --user)
             USER_MODE=true
             shift
@@ -63,7 +101,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [--user] [-y] [--uninstall]"
+            usage
             exit 0
             ;;
         *)
@@ -73,8 +111,59 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+confirm() {
+    # confirm PROMPT — true on -y, a non-interactive stdin, or an explicit yes
+    [[ "$YES" == true || ! -t 0 ]] && return 0
+    local reply
+    read -r -p "$1 [y/N] " reply
+    [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+# Root shells on minimal images often lack sudo; everything below is already
+# privileged there, so run the command directly.
+if [[ $EUID -eq 0 ]] && ! command -v sudo >/dev/null 2>&1; then
+    sudo() {
+        while [[ "${1:-}" == -* ]]; do
+            shift
+        done
+        "$@"
+    }
+fi
+
 if [[ "$UNINSTALL" == true ]]; then
     log_info "Uninstalling ovbuilder"
+
+    web_units=()
+    for unit in ovbuilder-web ovbuilder-worker; do
+        [ -f "/etc/systemd/system/${unit}.service" ] && web_units+=("$unit")
+    done
+    if [[ ${#web_units[@]} -gt 0 ]]; then
+        sudo systemctl disable --now "${web_units[@]}" 2>/dev/null || true
+        for unit in "${web_units[@]}"; do
+            sudo rm -f "/etc/systemd/system/${unit}.service"
+        done
+        sudo systemctl daemon-reload 2>/dev/null || true
+        log_ok "Removed systemd units: ${web_units[*]}"
+    fi
+    nginx_site_removed=false
+    for site in /etc/nginx/sites-enabled/ovbuilder /etc/nginx/sites-available/ovbuilder \
+                /etc/nginx/conf.d/ovbuilder.conf; do
+        if [ -e "$site" ] || [ -L "$site" ]; then
+            sudo rm -f "$site"
+            nginx_site_removed=true
+        fi
+    done
+    if [[ "$nginx_site_removed" == true ]]; then
+        if sudo nginx -t >/dev/null 2>&1; then
+            sudo systemctl reload nginx 2>/dev/null || true
+        fi
+        log_ok "Removed the ovbuilder nginx site"
+    fi
+    if [[ -f /opt/ovbuilder/web/backend/.env ]]; then
+        log_warn "/opt/ovbuilder/web/backend/.env (SECRET_KEY, DB password) will be deleted."
+        log_warn "Packages, Postgres data, and Redis are left in place."
+        confirm "Continue uninstall?" || { log_info "Aborted."; exit 1; }
+    fi
 
     # Always clean system locations (may require sudo)
     if [ -L /usr/local/bin/ovbuilder ]; then
@@ -98,6 +187,44 @@ if [[ "$UNINSTALL" == true ]]; then
 
     log_ok "ovbuilder has been uninstalled."
     exit 0
+fi
+
+if [[ "$WEB" == false && ${#WEB_ARGS[@]} -gt 0 ]]; then
+    log_err "--start and '--' options only apply with --web"
+    exit 1
+fi
+
+if [[ "$WEB" == true ]]; then
+    if [[ "$USER_MODE" == true ]]; then
+        log_err "--web is a system install; it cannot be combined with --user"
+        exit 1
+    fi
+    if [[ "$(uname -s)" != Linux ]]; then
+        log_err "--web targets a dedicated Linux host with systemd"
+        exit 1
+    fi
+    if [[ $EUID -ne 0 ]]; then
+        log_err "--web must run as root: sudo $0 --web"
+        exit 1
+    fi
+    echo -e "${BOLD}Full platform install${NC}: CLI → /opt/ovbuilder, then Postgres, Redis, Nginx,"
+    echo "Node, the API, the Celery worker, and systemd units on this host."
+    confirm "Install system packages and services on this host?" \
+        || { log_info "Aborted."; exit 1; }
+
+    # The CLI venv below needs ensurepip; fresh Debian/Ubuntu hosts lack it.
+    # The rest of the platform packages come from install-web.sh --with-deps.
+    log_info "Installing Python bootstrap packages"
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -q
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3 python3-venv rsync
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q python3 python3-pip rsync
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y -q python3 python3-pip rsync
+    else
+        log_warn "No apt/dnf/yum found; assuming Python 3.9+ with venv and rsync are present"
+    fi
 fi
 
 # Determine install location
@@ -155,6 +282,15 @@ else
 fi
 
 # --- Create virtual environment using the found Python ---
+# A venv without pip is a leftover from a failed create (e.g. no ensurepip).
+if [[ -d "$VENV_DIR" && ! -x "$VENV_DIR/bin/pip" ]]; then
+    log_warn "Incomplete virtual environment at $VENV_DIR (no pip) — recreating"
+    if [[ "$USE_SUDO" == true ]]; then
+        sudo rm -rf "$VENV_DIR"
+    else
+        rm -rf "$VENV_DIR"
+    fi
+fi
 if [[ ! -d "$VENV_DIR" ]]; then
     log_info "Creating virtual environment at $VENV_DIR"
     if [[ "$USE_SUDO" == true ]]; then
@@ -213,6 +349,7 @@ fi
 if [[ "$USE_SUDO" == true && $EUID -ne 0 ]]; then
     sudo -H bash -c "umask 022; cd '$SCRIPT_DIR' && '$VENV_PIP' install --quiet --no-cache-dir --force-reinstall $INSTALL_SPEC"
 else
+    # shellcheck disable=SC2086 # INSTALL_SPEC is "-e ." in user mode
     (umask 022; $PIP_CMD install --quiet --no-cache-dir --force-reinstall $INSTALL_SPEC)
 fi
 
@@ -319,7 +456,9 @@ if [[ "$USE_SUDO" == true ]]; then
     sudo chmod 755 "$OVBUILDER_BIN" 2>/dev/null || true
     sudo chmod 755 "$VENV_DIR/bin" 2>/dev/null || true
     for pybin in "$VENV_DIR/bin/python" "$VENV_DIR/bin/python3" "$VENV_DIR/bin/python"*; do
-        [ -f "$pybin" ] && sudo chmod 755 "$pybin" 2>/dev/null || true
+        if [ -f "$pybin" ]; then
+            sudo chmod 755 "$pybin" 2>/dev/null || true
+        fi
     done
 else
     chmod 755 "$OVBUILDER_BIN" 2>/dev/null || true
@@ -482,4 +621,10 @@ if [ -L "$HOME/.local/bin/ovbuilder" ]; then
 fi
 if [ -f "$HOME/.local/share/ovbuilder/venv/pyvenv.cfg" ]; then
     chmod 644 "$HOME/.local/share/ovbuilder/venv/pyvenv.cfg" 2>/dev/null || true
+fi
+
+if [[ "$WEB" == true ]]; then
+    echo
+    log_info "CLI ready — installing the web platform (web/install-web.sh --with-deps ${WEB_ARGS[*]})"
+    OVBUILDER_ROOT="$INSTALL_DIR" exec "$SCRIPT_DIR/web/install-web.sh" --with-deps "${WEB_ARGS[@]}"
 fi

@@ -111,13 +111,13 @@ Add the venv `Scripts` folder to your user PATH, or activate the venv each sessi
 
 ### Dedicated web box (optional)
 
-`./install.sh` installs the **CLI only**. The self-service SPA, FastAPI, and
-Celery worker are a separate bare-metal path on a Linux host with Postgres,
-Redis, and Nginx:
+Plain `./install.sh` installs the **CLI only**. On a dedicated Linux host
+(Ubuntu/Debian or RHEL family, systemd), one command installs the whole
+platform: CLI, Postgres, Redis, Nginx, Node, the FastAPI API, the Celery
+worker, and their systemd units. It is safe to re-run.
 
 ```bash
-sudo ./install.sh
-sudo ./web/install-web.sh
+sudo ./install.sh --web --start
 ```
 
 Prerequisites, `.env`, systemd, nginx, and health checks: **[docs/WEB.md](docs/WEB.md)**.
