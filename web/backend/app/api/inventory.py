@@ -5,18 +5,26 @@ datacenter (config goldens are the vCenter-down fallback). Environment →
 datastore-cluster mapping comes from ovbuilder config. Clusters (ClusterComputeResource only), standalone hosts, networks,
 datacenters, and datastore clusters are listed live via ``ovbuilder.vsphere``.
 
-Live endpoints return HTTP 502 with a clear message when vCenter is
-unreachable or credentials are missing — they never invent fake names.
-OS images are the exception: a failed scan falls back to configured
-``ovbuilder-*`` goldens so the form still renders.
+Live lists are cached per process (see ``app.inventory_cache``) so the build
+form does not open a vCenter session per dropdown on every page load. Every
+response carries ``X-Inventory-Source`` (``live``, ``cache``, ``stale`` or
+``fallback``) and ``X-Inventory-Age`` (seconds). Pass ``?refresh=true`` to
+bypass the fresh cache.
+
+When vCenter is unreachable the last good list is served as ``stale``. With
+no usable cached list, live endpoints return HTTP 502 with a clear message
+(and ``Retry-After`` during the error backoff) — they never invent fake
+names. OS images are the exception: with nothing cached, a failed scan falls
+back to configured ``ovbuilder-*`` goldens so the form still renders.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List
+import math
+from typing import Any, Callable, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from ovbuilder import vsphere
 from ovbuilder.goldens import (
     discover_goldens,
@@ -29,11 +37,17 @@ from ovbuilder.placement import (
 )
 
 from ..auth import require_builder
+from ..config import get_settings
+from ..inventory_cache import CacheResult, InventoryCache, InventoryUnavailable
 from ..models import UserOut
-from ..vsphere_client import vsphere_session
+from ..vsphere_client import session_identity, vsphere_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_cache = InventoryCache()
+
+RefreshParam = Query(False, description="Bypass the fresh cache and query vCenter now")
 
 # Last-resort OS rows when CLI config cannot be loaded (matches CLI defaults).
 _FALLBACK_OS = [
@@ -87,50 +101,100 @@ def _resolve_datacenter(si, configured: str) -> str:
     )
 
 
-def _list_live(list_fn: Callable, *, needs_dc: bool = True) -> List[str]:
-    try:
+def _set_source(response: Response, source: str, age: float = 0.0) -> None:
+    response.headers["X-Inventory-Source"] = source
+    response.headers["X-Inventory-Age"] = str(int(age))
+
+
+def _cached(name: str, loader: Callable[[], Any], *, refresh: bool) -> CacheResult:
+    """Load ``name`` through the shared cache. Raises InventoryUnavailable."""
+    settings = get_settings()
+
+    def _load() -> Any:
+        try:
+            return loader()
+        except Exception:
+            logger.warning("live vSphere inventory failed: %s", name, exc_info=True)
+            raise
+
+    result = _cache.get(
+        (name, *session_identity(settings)),
+        _load,
+        ttl=max(0, settings.inventory_cache_ttl_seconds),
+        stale_ttl=max(0, settings.inventory_stale_ttl_seconds),
+        error_backoff=max(0, settings.inventory_error_backoff_seconds),
+        refresh=refresh,
+    )
+    if result.source == "stale":
+        logger.info(
+            "serving stale vSphere inventory %s (age %ds)", name, int(result.age)
+        )
+    return result
+
+
+def _list_live(
+    name: str,
+    list_fn: Callable,
+    response: Response,
+    *,
+    refresh: bool,
+    needs_dc: bool = True,
+) -> List[str]:
+    def _load() -> List[str]:
         with vsphere_session() as (si, datacenter):
             if needs_dc:
-                dc = _resolve_datacenter(si, datacenter)
-                raw = list_fn(si, dc)
-            else:
-                raw = list_fn(si)
-            return _names(raw)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("live vSphere inventory failed", exc_info=True)
+                return _names(list_fn(si, _resolve_datacenter(si, datacenter)))
+            return _names(list_fn(si))
+
+    try:
+        result = _cached(name, _load, refresh=refresh)
+    except InventoryUnavailable as exc:
+        headers = (
+            {"Retry-After": str(math.ceil(exc.retry_after))} if exc.retry_after else None
+        )
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
             _public_error(exc),
+            headers=headers,
         ) from exc
+    _set_source(response, result.source, result.age)
+    return list(result.value)
+
+
+# Endpoints are sync on purpose: pyVmomi blocks, so FastAPI runs them in its
+# threadpool instead of stalling the event loop while vCenter responds.
 
 
 @router.get("/os-images")
-async def os_images(_user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
+def os_images(
+    response: Response,
+    refresh: bool = RefreshParam,
+    _user: UserOut = Depends(require_builder),
+) -> List[Dict[str, str]]:
     """Live ovbuilder-* templates (name + label). Source DC is not returned."""
-    try:
+
+    def _load() -> List[Dict[str, str]]:
         with vsphere_session() as (si, _datacenter):
-            goldens = discover_goldens(si)
-        return public_os_rows(goldens)
-    except HTTPException:
-        raise
-    except Exception:
-        logger.debug(
-            "os-images: live inventory unavailable, using config fallback",
-            exc_info=True,
-        )
+            return public_os_rows(discover_goldens(si))
+
+    try:
+        result = _cached("os-images", _load, refresh=refresh)
+        _set_source(response, result.source, result.age)
+        return [dict(row) for row in result.value]
+    except InventoryUnavailable:
+        logger.debug("os-images: live inventory unavailable, using config fallback")
+    _set_source(response, "fallback")
     try:
         rows = public_os_rows_from_config()
         if rows:
             return rows
     except Exception:
         logger.debug("os-images: CLI config unavailable, using fallback", exc_info=True)
-    return list(_FALLBACK_OS)
+    return [dict(row) for row in _FALLBACK_OS]
 
 
 @router.get("/environments")
-async def environments(_user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
+def environments(_user: UserOut = Depends(require_builder)) -> List[Dict[str, str]]:
     try:
         rows = environments_as_dicts()
         if rows:
@@ -150,33 +214,61 @@ async def environments(_user: UserOut = Depends(require_builder)) -> List[Dict[s
 
 
 @router.get("/datacenters")
-async def datacenters(_user: UserOut = Depends(require_builder)) -> List[str]:
-    return _list_live(vsphere.list_datacenters, needs_dc=False)
+def datacenters(
+    response: Response,
+    refresh: bool = RefreshParam,
+    _user: UserOut = Depends(require_builder),
+) -> List[str]:
+    return _list_live(
+        "datacenters", vsphere.list_datacenters, response, refresh=refresh, needs_dc=False
+    )
 
 
 @router.get("/clusters")
-async def clusters(_user: UserOut = Depends(require_builder)) -> List[str]:
+def clusters(
+    response: Response,
+    refresh: bool = RefreshParam,
+    _user: UserOut = Depends(require_builder),
+) -> List[str]:
     """Real vSphere compute clusters only (never standalone ESXi hosts)."""
-    return _list_live(vsphere.list_clusters)
+    return _list_live("clusters", vsphere.list_clusters, response, refresh=refresh)
 
 
 @router.get("/hosts")
-async def hosts(_user: UserOut = Depends(require_builder)) -> List[str]:
+def hosts(
+    response: Response,
+    refresh: bool = RefreshParam,
+    _user: UserOut = Depends(require_builder),
+) -> List[str]:
     """Standalone ESXi hosts (not members of a ClusterComputeResource)."""
-    return _list_live(vsphere.list_standalone_hosts)
+    return _list_live("hosts", vsphere.list_standalone_hosts, response, refresh=refresh)
 
 
 @router.get("/networks")
-async def networks(_user: UserOut = Depends(require_builder)) -> List[str]:
-    return _list_live(vsphere.list_networks)
+def networks(
+    response: Response,
+    refresh: bool = RefreshParam,
+    _user: UserOut = Depends(require_builder),
+) -> List[str]:
+    return _list_live("networks", vsphere.list_networks, response, refresh=refresh)
 
 
 @router.get("/datastore-clusters")
-async def datastore_clusters(_user: UserOut = Depends(require_builder)) -> List[str]:
-    return _list_live(vsphere.list_datastore_clusters)
+def datastore_clusters(
+    response: Response,
+    refresh: bool = RefreshParam,
+    _user: UserOut = Depends(require_builder),
+) -> List[str]:
+    return _list_live(
+        "datastore-clusters", vsphere.list_datastore_clusters, response, refresh=refresh
+    )
 
 
 @router.get("/datastores")
-async def datastores(_user: UserOut = Depends(require_builder)) -> List[str]:
+def datastores(
+    response: Response,
+    refresh: bool = RefreshParam,
+    _user: UserOut = Depends(require_builder),
+) -> List[str]:
     """Live datastore names. The build form does not expose these as a picker."""
-    return _list_live(vsphere.list_datastores)
+    return _list_live("datastores", vsphere.list_datastores, response, refresh=refresh)

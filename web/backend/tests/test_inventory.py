@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -32,6 +33,13 @@ def _client(role: Role = Role.builder) -> TestClient:
 @contextmanager
 def _session(datacenter: str = "Main DC"):
     yield (object(), datacenter)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_inventory_cache():
+    inventory_api._cache.clear()
+    yield
+    inventory_api._cache.clear()
 
 
 def test_environments_come_from_shared_mapping():
@@ -190,3 +198,157 @@ def test_admin_can_read_inventory():
         res = _client(Role.admin).get("/api/inventory/networks")
     assert res.status_code == 200
     assert res.json() == ["VM Dev"]
+
+
+class _CountingSession:
+    """vsphere_session stand-in that counts opens and can be switched off."""
+
+    def __init__(self, datacenter: str = "Main DC") -> None:
+        self.datacenter = datacenter
+        self.opens = 0
+        self.down = False
+
+    @contextmanager
+    def __call__(self):
+        self.opens += 1
+        if self.down:
+            raise RuntimeError("Failed to connect to vCenter vc.example.com: timed out")
+        yield (object(), self.datacenter)
+
+
+def _patched(session, fake_vsphere):
+    return patch.object(inventory_api, "vsphere_session", session), patch.object(
+        inventory_api, "vsphere", fake_vsphere
+    )
+
+
+def test_clusters_cached_between_requests():
+    session = _CountingSession()
+    fake_vsphere = MagicMock()
+    fake_vsphere.list_clusters.return_value = ["Production Cluster"]
+    p1, p2 = _patched(session, fake_vsphere)
+    with p1, p2:
+        client = _client()
+        first = client.get("/api/inventory/clusters")
+        second = client.get("/api/inventory/clusters")
+    assert first.headers["X-Inventory-Source"] == "live"
+    assert second.headers["X-Inventory-Source"] == "cache"
+    assert second.json() == ["Production Cluster"]
+    assert session.opens == 1
+    fake_vsphere.list_clusters.assert_called_once()
+
+
+def test_refresh_query_bypasses_cache():
+    session = _CountingSession()
+    fake_vsphere = MagicMock()
+    fake_vsphere.list_networks.side_effect = [["VM Old"], ["VM Old", "VM New"]]
+    p1, p2 = _patched(session, fake_vsphere)
+    with p1, p2:
+        client = _client()
+        client.get("/api/inventory/networks")
+        res = client.get("/api/inventory/networks?refresh=true")
+    assert res.headers["X-Inventory-Source"] == "live"
+    assert res.json() == ["VM Old", "VM New"]
+    assert session.opens == 2
+
+
+def test_endpoints_cache_independently():
+    session = _CountingSession()
+    fake_vsphere = MagicMock()
+    fake_vsphere.list_clusters.return_value = ["C1"]
+    fake_vsphere.list_networks.return_value = ["N1"]
+    p1, p2 = _patched(session, fake_vsphere)
+    with p1, p2:
+        client = _client()
+        assert client.get("/api/inventory/clusters").json() == ["C1"]
+        assert client.get("/api/inventory/networks").json() == ["N1"]
+    assert session.opens == 2
+
+
+def test_vcenter_down_serves_stale_list(monkeypatch):
+    monkeypatch.setenv("INVENTORY_CACHE_TTL_SECONDS", "0")
+    inventory_api.get_settings.cache_clear()
+    session = _CountingSession()
+    fake_vsphere = MagicMock()
+    fake_vsphere.list_clusters.return_value = ["Production Cluster"]
+    p1, p2 = _patched(session, fake_vsphere)
+    try:
+        with p1, p2:
+            client = _client()
+            assert client.get("/api/inventory/clusters").status_code == 200
+            session.down = True
+            res = client.get("/api/inventory/clusters")
+    finally:
+        inventory_api.get_settings.cache_clear()
+    assert res.status_code == 200
+    assert res.json() == ["Production Cluster"]
+    assert res.headers["X-Inventory-Source"] == "stale"
+
+
+def test_vcenter_down_without_cache_is_502_with_retry_after():
+    session = _CountingSession()
+    session.down = True
+    p1, p2 = _patched(session, MagicMock())
+    with p1, p2:
+        client = _client()
+        first = client.get("/api/inventory/networks")
+        second = client.get("/api/inventory/networks")
+    assert first.status_code == 502
+    assert "timed out" in first.json()["detail"]
+    assert int(first.headers["Retry-After"]) > 0
+    assert second.status_code == 502
+    assert session.opens == 1, "error backoff must not reconnect immediately"
+
+
+def test_os_images_cached_and_stale_beats_config_fallback(monkeypatch):
+    monkeypatch.setenv("INVENTORY_CACHE_TTL_SECONDS", "0")
+    inventory_api.get_settings.cache_clear()
+    session = _CountingSession()
+    live = [
+        GoldenTemplate(
+            name="ovbuilder-rocky-9",
+            datacenter="PDXC",
+            datastore="HOTH_DEV",
+            key="rocky-9",
+            label="Rocky 9",
+            default_user="rocky",
+        )
+    ]
+    try:
+        with patch.object(inventory_api, "vsphere_session", session), patch.object(
+            inventory_api, "discover_goldens", return_value=live
+        ):
+            client = _client()
+            assert client.get("/api/inventory/os-images").json()[0]["key"] == "rocky-9"
+            session.down = True
+            res = client.get("/api/inventory/os-images")
+    finally:
+        inventory_api.get_settings.cache_clear()
+    assert res.headers["X-Inventory-Source"] == "stale"
+    assert [row["key"] for row in res.json()] == ["rocky-9"]
+
+
+def test_os_images_config_fallback_flagged():
+    session = _CountingSession()
+    session.down = True
+    with patch.object(inventory_api, "vsphere_session", session):
+        res = _client().get("/api/inventory/os-images")
+    assert res.status_code == 200
+    assert res.headers["X-Inventory-Source"] == "fallback"
+    assert res.json()
+
+
+def test_cache_key_tracks_vcenter_identity():
+    session = _CountingSession()
+    fake_vsphere = MagicMock()
+    fake_vsphere.list_clusters.side_effect = [["VC1 Cluster"], ["VC2 Cluster"]]
+    identity = ["vc1.example.com", "svc", "DC"]
+    p1, p2 = _patched(session, fake_vsphere)
+    with p1, p2, patch.object(
+        inventory_api, "session_identity", lambda _settings=None: tuple(identity)
+    ):
+        client = _client()
+        assert client.get("/api/inventory/clusters").json() == ["VC1 Cluster"]
+        identity[0] = "vc2.example.com"
+        assert client.get("/api/inventory/clusters").json() == ["VC2 Cluster"]
+    assert session.opens == 2
