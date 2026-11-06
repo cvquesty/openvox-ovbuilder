@@ -16,8 +16,23 @@ from ..auth import (
     role_from_groups,
 )
 from ..config import get_settings
-from ..database import list_users, set_role_override, upsert_user
-from ..models import Role, RoleOverrideIn, Token, UserAdminOut, UserOut, effective_role
+from ..database import (
+    get_notification_prefs,
+    list_users,
+    set_notification_prefs,
+    set_role_override,
+    upsert_user,
+)
+from ..models import (
+    NotificationPrefs,
+    NotificationPrefsUpdate,
+    Role,
+    RoleOverrideIn,
+    Token,
+    UserAdminOut,
+    UserOut,
+    effective_role,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +71,20 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
 @router.get("/me", response_model=UserOut)
 async def me(user: UserOut = Depends(get_current_user)):
     return user
+
+
+@router.get("/me/notifications", response_model=NotificationPrefs)
+async def my_notification_prefs(user: UserOut = Depends(get_current_user)):
+    """Email preferences for builds the current user requested."""
+    return await get_notification_prefs(user.username)
+
+
+@router.put("/me/notifications", response_model=NotificationPrefs)
+async def update_my_notification_prefs(
+    body: NotificationPrefsUpdate,
+    user: UserOut = Depends(get_current_user),
+):
+    return await set_notification_prefs(user.username, body)
 
 
 @router.get("/roles")

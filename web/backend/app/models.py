@@ -149,6 +149,26 @@ class UserAdminOut(BaseModel):
     ldap_checked_at: Optional[datetime] = None
 
 
+class NotificationPrefs(BaseModel):
+    """Per-user email preferences for builds the user requested.
+
+    Admin channel toggles (Settings) still gate every event; these can only
+    narrow what reaches this user's inbox.
+    """
+
+    email_enabled: bool = True
+    on_success: bool = True
+    on_failure: bool = True
+    on_cancelled: bool = False
+
+
+class NotificationPrefsUpdate(BaseModel):
+    email_enabled: Optional[bool] = None
+    on_success: Optional[bool] = None
+    on_failure: Optional[bool] = None
+    on_cancelled: Optional[bool] = None
+
+
 class RoleOverrideIn(BaseModel):
     """Set or clear a local role override. ``null`` clears (LDAP mapping wins)."""
 

@@ -18,6 +18,7 @@ This guide covers **macOS, Linux, and Windows**.
 | vSphere password for the web app | `/opt/ovbuilder/web/backend/.env` (`VSPHERE_PASSWORD` or `OVBUILDER_VSPHERE_PASSWORD`) or the admin Configuration page | Live inventory + VM lifecycle |
 | vSphere password on a submitted build | Postgres `build_jobs.request` JSON (in-flight jobs). Never in Celery/Redis task args or API responses | Celery worker |
 | Web API JWT secret | `web/backend/.env` `SECRET_KEY` (required unless `DEBUG=true`) | FastAPI |
+| Notification webhook URL / SMTP password | `web/backend/.env` (`NOTIFY_WEBHOOK_URL` / `SMTP_PASSWORD`, or `OVBUILDER_` aliases) or the admin Configuration page (0600 runtime settings). Never returned by the API | Celery worker notifications |
 | LDAP TLS CA | `LDAP_CA_CERTS_FILE` PEM path | Web LDAP bind |
 
 ### Config directory (where `secrets.env` goes)

@@ -82,7 +82,17 @@ export const auth = {
       method: 'PUT',
       body: JSON.stringify({ role_override }),
     }),
+  notificationPrefs: () => request<NotificationPrefs>('/auth/me/notifications'),
+  updateNotificationPrefs: (body: Partial<NotificationPrefs>) =>
+    request<NotificationPrefs>('/auth/me/notifications', { method: 'PUT', body: JSON.stringify(body) }),
 };
+
+export interface NotificationPrefs {
+  email_enabled: boolean;
+  on_success: boolean;
+  on_failure: boolean;
+  on_cancelled: boolean;
+}
 
 export const builds = {
   submit: (body: BuildRequest) => request<BuildJob>('/builds', { method: 'POST', body: JSON.stringify(body) }),
@@ -194,7 +204,24 @@ export interface RuntimeSettings {
   notify_on_success: boolean;
   notify_on_failure: boolean;
   notify_on_cancelled: boolean;
+  notify_webhook_format: WebhookFormat;
+  public_base_url: string;
+  notify_text_template: string;
+  notify_email_subject_template: string;
+  notify_email_body_template: string;
+  notify_email_enabled: boolean;
+  notify_email_owner: boolean;
+  notify_email_to: string;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_password_set: boolean;
+  smtp_starttls: boolean;
+  smtp_ssl: boolean;
+  smtp_from: string;
 }
+
+export type WebhookFormat = 'slack' | 'json';
 
 export interface RuntimeSettingsUpdate {
   vsphere_server?: string;
@@ -209,6 +236,22 @@ export interface RuntimeSettingsUpdate {
   notify_on_success?: boolean;
   notify_on_failure?: boolean;
   notify_on_cancelled?: boolean;
+  notify_webhook_format?: WebhookFormat;
+  public_base_url?: string;
+  notify_text_template?: string;
+  notify_email_subject_template?: string;
+  notify_email_body_template?: string;
+  notify_email_enabled?: boolean;
+  notify_email_owner?: boolean;
+  notify_email_to?: string;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_user?: string;
+  /** Omit or undefined to leave unchanged; empty string clears. */
+  smtp_password?: string;
+  smtp_starttls?: boolean;
+  smtp_ssl?: boolean;
+  smtp_from?: string;
 }
 
 export const settings = {

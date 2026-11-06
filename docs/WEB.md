@@ -368,7 +368,52 @@ see [Inventory caching](#inventory-caching).
 - `GET /api/vms` — live VM list
 - `POST /api/vms/{name}/power-on|power-off|reboot|snapshot`
 - `DELETE /api/vms/{name}` — admin only
-- `GET|PUT /api/settings` — admin-only vSphere + npm registry
+- `GET|PUT /api/settings` — admin-only vSphere, npm registry, notifications
+- `GET|PUT /api/auth/me/notifications` — the current user's build email preferences
+
+## Build notifications
+
+Every channel is **off by default**. When a build reaches `succeeded`,
+`failed`, or `cancelled`, the Celery worker fans it out to whatever is
+configured. Delivery errors (bad URL, SMTP down, broken template) are logged
+as warnings and never change the build's status.
+
+Configure in **Configuration → Notifications** (admin) or in `.env`. A value
+saved in the UI wins; an empty UI field falls back to `.env`.
+
+- **Events:** `NOTIFY_ON_SUCCESS` / `NOTIFY_ON_FAILURE` / `NOTIFY_ON_CANCELLED`
+  gate every channel.
+- **Webhook:** `NOTIFY_WEBHOOK_URL` (http/https only).
+  `NOTIFY_WEBHOOK_FORMAT=slack` posts `{"text": "..."}` (Slack incoming
+  webhook, Mattermost, and so on). `json` posts
+  `{"event": "build.failed", "text": "...", "job": {...}}` for generic
+  receivers. User-supplied fields are escaped in Slack text so a hostname
+  cannot `@channel`.
+- **Email:** needs `NOTIFY_EMAIL_ENABLED=true`, `SMTP_HOST`, and a sender
+  (`SMTP_FROM`, else `SMTP_USER`). STARTTLS on port 587 is the default;
+  `SMTP_SSL=true` with port 465 uses implicit TLS. `NOTIFY_EMAIL_OWNER=true`
+  mails the requester at the directory email captured at login, if their
+  preferences allow it. `NOTIFY_EMAIL_TO` adds fixed recipients, such as an
+  ops list.
+- **Per-user preferences:** **My notifications** (every role) turns email on
+  or off for the user's own builds, per event. Defaults: success and failure
+  on, cancel off. These can only narrow what the admin enabled.
+- **Templates:** `NOTIFY_TEXT_TEMPLATE` (webhook text),
+  `NOTIFY_EMAIL_SUBJECT_TEMPLATE`, and `NOTIFY_EMAIL_BODY_TEMPLATE` use
+  `$name` placeholders (Python `string.Template`). Blank means the built-in
+  default. Variables: `$status $hostname $requested_by $job_id $ip $vm_ip
+  $vm_name $os_image $environment $cluster $error $created_at $started_at
+  $finished_at $duration $job_url $job_link $details $app_name`. Set
+  `PUBLIC_BASE_URL` to get `$job_url` links. Unknown placeholders are left
+  as written.
+
+`SMTP_PASSWORD` and the webhook URL are secrets, handled like the vSphere
+password: set them in the gitignored `.env` / process environment
+(`SMTP_PASSWORD` or `OVBUILDER_SMTP_PASSWORD`, `NOTIFY_WEBHOOK_URL` or
+`OVBUILDER_NOTIFY_WEBHOOK_URL`), or in the admin UI, which stores them in the
+0600 `runtime_settings.json` under `OVBUILDER_DATA_DIR` (outside the repo).
+Never commit them. The API never returns them, only `*_set` booleans. Build passwords
+are never placed in notification payloads.
 
 ## Secrets and TLS
 
