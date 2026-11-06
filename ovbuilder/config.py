@@ -143,6 +143,15 @@ class OvbuilderConfig(BaseModel):
         default="",
         description="Path to Terraform root (empty = discover bundled/install path)",
     )
+    # "local" keeps per-VM state under the data dir. s3 / azurerm / gcs /
+    # consul store each VM under <terraform_state_prefix>/<hostname>.
+    terraform_backend: str = "local"
+    # Non-secret backend settings (bucket, region, use_lockfile, …). Keep
+    # credentials in the backend's own env vars (AWS_*, ARM_*, CONSUL_HTTP_TOKEN).
+    terraform_backend_config: Dict[str, Any] = Field(default_factory=dict)
+    terraform_state_prefix: str = "ovbuilder"
+    # How long apply waits for a Terraform state lock held by someone else.
+    terraform_lock_timeout: str = "60s"
 
     # --- vSphere placement defaults (overridden by interactive discovery) ---
     vsphere_server: str = "vcenter.example.com"
@@ -261,6 +270,8 @@ class ConfigManager:
         # Environment overrides (non-secret placement / mode knobs)
         if td := os.environ.get("OVBUILDER_TERRAFORM_DIR"):
             cfg.terraform_dir = td
+        if backend := os.environ.get("OVBUILDER_TERRAFORM_BACKEND"):
+            cfg.terraform_backend = backend.strip().lower()
         if ds := os.environ.get("OVBUILDER_VM_DATASTORE"):
             cfg.vm_datastore = ds
         if dsc := os.environ.get("OVBUILDER_VM_DATASTORE_CLUSTER"):
