@@ -28,7 +28,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-BOLD='\033[1m'
 NC='\033[0m'
 
 log_info()  { echo -e "${CYAN}→${NC} $*"; }
@@ -43,6 +42,8 @@ VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo '0.1.0')"
 INSTALL_DIR="/opt/ovbuilder"
 USER_MODE=false
 UNINSTALL=false
+# -y/--yes is accepted for scripted installs; the installer has no prompts yet.
+# shellcheck disable=SC2034
 YES=false
 
 # Parse args
@@ -57,6 +58,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -y|--yes)
+            # shellcheck disable=SC2034
             YES=true
             shift
             ;;

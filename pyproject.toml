@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ovbuilder"
-version = "0.97-beta37"
+version = "0.97-beta42"
 description = "ovbuilder — OpenVox command-line tool for building VMware VMs from ISO"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -41,6 +41,14 @@ Repository = "https://github.com/cvquesty/openvox-gui"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ovbuilder*"]
+
+[tool.ruff]
+target-version = "py39"
+extend-exclude = ["web/frontend"]
+
+[tool.ruff.lint.per-file-ignores]
+# SECRET_KEY / sys.path must be set before app modules are imported.
+"web/backend/tests/conftest.py" = ["E402"]
 
 # Keep the CLI pytest job scoped to ./tests so it does not collect
 # web/backend/tests (those run from web/backend with their own deps).

@@ -5,6 +5,25 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.97-beta42] - 2026-11-06
+
+### Added
+
+- **CI pipeline (closes #9).** `.github/workflows/ci.yml` now runs on PRs and
+  pushes to `staging` / `main` with read-only permissions and per-ref
+  concurrency: `ruff check` (Python lint), CLI pytest, web-backend pytest,
+  frontend `npm ci` + `typecheck` + `build`, `terraform fmt -check` +
+  `init -backend=false` + `validate`, and `shellcheck -S warning` on
+  `install.sh`, `web/install-web.sh` and `packer/scripts/*.sh`. pip and npm
+  dependencies are cached. No deploy or release steps.
+
+### Fixed
+
+- Lint fallout so CI is green: unused `typing.Sequence` imports in Alembic
+  revisions, a duplicate `GoldenTemplate` import in the inventory tests,
+  `terraform fmt` alignment in `modules/vm/main.tf`, and unused `BOLD` / `YES`
+  shellcheck warnings in `install.sh` (`-y` is still accepted).
+
 ## [0.97-beta37] - 2026-11-06
 
 ### Added

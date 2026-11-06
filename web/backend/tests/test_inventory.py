@@ -53,9 +53,6 @@ def test_environments_come_from_shared_mapping():
     assert by_key["prod"]["datastore_cluster"]
 
 
-from ovbuilder.goldens import GoldenTemplate
-
-
 def test_os_images_from_config():
     res = _client().get("/api/inventory/os-images")
     assert res.status_code == 200

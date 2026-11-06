@@ -33,7 +33,7 @@ locals {
   use_dsc  = var.vm_datastore_cluster != null && var.vm_datastore_cluster != ""
   is_host  = var.compute_type == "host"
   # Golden may live in another DC of the same vCenter (SEA3 clones PDXC goldens).
-  template_dc_name = var.template_datacenter != "" ? var.template_datacenter : var.datacenter
+  template_dc_name      = var.template_datacenter != "" ? var.template_datacenter : var.datacenter
   template_dc_is_remote = local.is_clone && local.template_dc_name != var.datacenter
   # Map of guestinfo.* keys from ovbuilder (base64 metadata/userdata).
   guestinfo = var.guestinfo_extra_config
