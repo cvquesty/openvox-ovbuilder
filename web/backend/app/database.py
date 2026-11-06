@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional, Sequence
 
 from sqlalchemy import JSON, Boolean, DateTime, String, Text, create_engine, func, select
@@ -267,28 +266,27 @@ def _row_from_job(job: BuildJob) -> JobRow:
     )
 
 
-def run_alembic_upgrade() -> None:
-    """Apply Alembic migrations to ``head`` using the sync engine URL."""
-    from alembic import command
-    from alembic.config import Config
+def _is_sqlite_memory(sync_url: str) -> bool:
+    return _is_sqlite(sync_url) and (sync_url.endswith(":memory:") or sync_url.endswith("://"))
 
-    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
-    cfg = Config(str(ini))
-    cfg.set_main_option("script_location", str(ini.parent / "alembic"))
-    _, sync_url = database_urls()
-    cfg.set_main_option("sqlalchemy.url", sync_url)
-    command.upgrade(cfg, "head")
+
+def run_alembic_upgrade(database_url: Optional[str] = None) -> None:
+    """Apply Alembic migrations to ``head`` (adopting pre-Alembic schemas)."""
+    from .migrations import upgrade
+
+    _, sync_url = database_urls(database_url)
+    upgrade(sync_url)
 
 
 async def init_db() -> None:
-    """Bring schema up to date.
+    """Bring schema up to date with Alembic ``upgrade head``.
 
-    Postgres: Alembic ``upgrade head`` (same path as ``install-web.sh``).
-    sqlite: ``create_all`` so unit tests do not need a migration runner.
+    Same path as ``install-web.sh``; a no-op when already at head. In-memory
+    sqlite has no file Alembic can reopen, so it falls back to ``create_all``.
     """
     _ensure_configured()
     _, sync_url = database_urls()
-    if _is_sqlite(sync_url):
+    if _is_sqlite_memory(sync_url):
         async with get_async_engine().begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         return

@@ -5,6 +5,40 @@ All notable changes to ovbuilder will be documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`alembic upgrade head` adopts pre-Alembic databases** (#10). Hosts that
+  ran 0.97-beta19 created `build_jobs` with `create_all` and have no
+  `alembic_version`, so the upgrade failed with "relation already exists".
+  Alembic now checks those tables against the frozen baseline columns,
+  stamps the matching revision (`0001`, or `0002` when `users` exists), and
+  applies the rest. Unrecognized schemas stop with `UnrecognizedSchemaError`
+  and are left unchanged.
+- **Concurrent migrations are serialized** on Postgres with a session
+  advisory lock (installer and API startup).
+- **API startup no longer reconfigures logging** when it runs migrations
+  (Alembic's `fileConfig` disabled uvicorn's loggers).
+
+### Changed
+
+- **Alembic is the only schema path.** `init_db()` runs `upgrade head` for
+  file-backed sqlite as well as Postgres, and the test fixtures migrate
+  instead of calling `create_all`. Only in-memory sqlite still uses
+  `create_all`.
+- New `app/migrations.py` holds the Alembic config, adoption, and lock
+  helpers shared by `alembic/env.py`, startup, and tests.
+
+### Added
+
+- `tests/test_migrations.py`: upgrade/downgrade round trip, idempotent
+  re-upgrade, model-vs-migration drift check, pre-Alembic adoption and
+  refusal cases, and a single-head check. Runs on sqlite always and on
+  Postgres when `OVBUILDER_TEST_POSTGRES_URL` is set.
+- `docs/WEB.md`: migration workflow (when migrations run, adopting old
+  databases, `alembic stamp`, adding a revision, resolving two heads).
+
 ## [0.97-beta42] - 2026-11-06
 
 ### Added
